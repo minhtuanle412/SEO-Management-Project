@@ -9,6 +9,20 @@ interface ProjectCardProps {
   project: Project;
 }
 
+const slugify = (text: string): string => {
+  return text
+    .toString()
+    .normalize('NFD') // Tách ký tự có dấu thành ký tự cơ bản và dấu
+    .replace(/[\u0300-\u036f]/g, '') // Xóa các dấu
+    .toLowerCase()
+    .replace(/\s+/g, '-') // Thay thế khoảng trắng bằng dấu gạch ngang
+    .replace(/[^\w-]+/g, '') // Xóa các ký tự không phải là chữ, số, hoặc gạch ngang
+    .replace(/--+/g, '-') // Thay thế nhiều dấu gạch ngang bằng một
+    .replace(/^-+/, '') // Xóa dấu gạch ngang ở đầu
+    .replace(/-+$/, ''); // Xóa dấu gạch ngang ở cuối
+};
+
+
 const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
   // Calculate KPI progress based on achieved months
   const latestKpiByContractMonth = project.kpiEntries.reduce((acc, entry) => {
@@ -19,7 +33,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
   }, {} as { [key: string]: KpiEntry });
 
   const achievedKpiMonths = Object.values(latestKpiByContractMonth).filter(
-      (entry) => entry.kpiPercentage >= 85
+      (entry) => entry.kpiPercentage >= 75
   ).length;
   const kpiProgressPercentage = (achievedKpiMonths / project.durationMonths) * 100;
 
@@ -41,9 +55,10 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
   }
 
   const status = getStatus();
+  const projectSlug = `${slugify(project.name)}--${project.id}`;
 
   return (
-    <Link to={`/project/${project.id}`} className="block bg-white rounded-xl shadow-lg hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 overflow-hidden">
+    <Link to={`/project/${projectSlug}`} className="block bg-white rounded-xl shadow-lg hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 overflow-hidden">
       <div className="p-5">
         <div className="flex justify-between items-start">
             <h3 className="text-lg font-bold text-primary mb-1">{project.name}</h3>

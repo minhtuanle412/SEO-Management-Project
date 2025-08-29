@@ -11,16 +11,19 @@ export enum ReportStatus {
 export interface KpiEntry {
   id: string;
   contractMonth: number;
-  actualMonth: string; // YYYY-MM
+  actualMonth: string; // YYYY-MM-DD. Stored as 'date' in DB.
   kpiPercentage: number;
   reportStatus: ReportStatus;
   reportSentDate?: string; // YYYY-MM-DD
   notes: string;
+  customerConfirmationUrl?: string;
 }
 
 export interface MonthlyProgress {
+  id: string;
   month: number;
   paymentStatus: PaymentStatus;
+  paymentProofUrl?: string;
 }
 
 export interface Project {
