@@ -87,6 +87,63 @@ const KpiManagementView: React.FC<{ project: Project; addKpiEntry: (projectId: s
     return (
         <div className="space-y-6">
             <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+                <h3 className="text-lg font-bold text-dark mb-4">Chi tiết từng tháng hợp đồng:</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                    {project.monthlyBreakdown.sort((a, b) => a.month - b.month).map(monthData => {
+                        const relevantKpis = project.kpiEntries.filter(k => k.contractMonth === monthData.month);
+                        const hasData = relevantKpis.length > 0;
+                        let latestKpi: KpiEntry | null = null;
+                        
+                        if (hasData) {
+                            relevantKpis.sort((a, b) => b.actualMonth.localeCompare(a.actualMonth));
+                            latestKpi = relevantKpis[0];
+                        }
+
+                        const isAchieved = hasData && latestKpi && latestKpi.kpiPercentage >= 75;
+                        const isPaid = monthData.paymentStatus === PaymentStatus.Paid;
+
+                        let cardClasses = 'border rounded-lg p-3 text-center flex flex-col justify-between items-center h-36 transition-all duration-200 ';
+                        let statusContent = null;
+
+                        if (isAchieved) {
+                            cardClasses += 'bg-green-50 border-green-300';
+                            statusContent = (
+                                <>
+                                    <p className="text-2xl font-bold text-green-800 my-1">{latestKpi!.kpiPercentage}%</p>
+                                    <CheckCircleIcon className="h-6 w-6 text-green-500 mt-1" />
+                                </>
+                            );
+                        } else if (hasData) {
+                            cardClasses += 'bg-orange-50 border-orange-400';
+                            statusContent = (
+                                <>
+                                    <p className="text-2xl font-bold text-orange-800 my-1">{latestKpi!.kpiPercentage}%</p>
+                                    <p className="text-xs font-semibold text-orange-600 mt-1">Chưa đạt</p>
+                                </>
+                            );
+                        } else {
+                            cardClasses += 'bg-gray-100 border-gray-200';
+                            statusContent = <p className="text-sm text-gray-500 mt-1">Chưa có KPI</p>;
+                        }
+
+                        return (
+                            <div key={monthData.month} className={cardClasses}>
+                                <div>
+                                    <p className="font-bold text-base text-slate-700">T{monthData.month}</p>
+                                    {statusContent}
+                                </div>
+                                <div className="pt-2">
+                                    <span className={`px-2 py-0.5 inline-flex text-xs leading-5 font-semibold rounded-full ${isPaid ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'}`}>
+                                        {monthData.paymentStatus}
+                                    </span>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
                 <h2 className="text-xl font-bold text-dark mb-4">Thêm KPI tháng mới</h2>
                 <form onSubmit={handleAddKpi}>
                     <div className="flex flex-wrap items-end gap-4">
@@ -129,26 +186,37 @@ const KpiManagementView: React.FC<{ project: Project; addKpiEntry: (projectId: s
                                 <th scope="col" className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Tỷ lệ đạt KPI</th>
                                 <th scope="col" className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Trạng thái Báo cáo</th>
                                 <th scope="col" className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Ngày gửi</th>
-                                <th scope="col" className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Đã thu tiền</th>
+                                <th scope="col" className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">KH Confirm</th>
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
                            {kpiEntriesSorted.length > 0 ? (
-                                kpiEntriesSorted.map(kpiEntry => {
-                                    const paymentInfo = project.monthlyBreakdown.find(m => m.month === kpiEntry.contractMonth);
-                                    const paymentStatus = paymentInfo ? paymentInfo.paymentStatus : PaymentStatus.Unpaid;
-
-                                    return (
+                                kpiEntriesSorted.map(kpiEntry => (
                                     <tr key={kpiEntry.id}>
                                         <td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">Tháng {kpiEntry.contractMonth}</td>
                                         <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">{format(new Date(kpiEntry.actualMonth), 'MM/yyyy')}</td>
                                         <td className="px-4 py-4 whitespace-nowrap text-sm font-bold text-primary">{kpiEntry.kpiPercentage}%</td>
                                         <td className="px-4 py-4 whitespace-nowrap text-sm"><span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${kpiEntry.reportStatus === ReportStatus.Sent ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>{kpiEntry.reportStatus}</span></td>
                                         <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500">{kpiEntry.reportSentDate ? format(new Date(kpiEntry.reportSentDate), 'dd/MM/yyyy') : '–'}</td>
-                                        <td className="px-4 py-4 whitespace-nowrap text-sm"><span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${paymentStatus === PaymentStatus.Paid ? 'bg-blue-100 text-blue-800' : 'bg-red-100 text-red-800'}`}>{paymentStatus}</span></td>
+                                        <td className="px-4 py-4 whitespace-nowrap text-sm">
+                                            {kpiEntry.customerConfirmationUrl ? (
+                                                <a 
+                                                    href={kpiEntry.customerConfirmationUrl} 
+                                                    target="_blank" 
+                                                    rel="noopener noreferrer" 
+                                                    className="inline-flex items-center text-green-600 hover:text-green-800 font-semibold group"
+                                                    title="Xem xác nhận"
+                                                >
+                                                    <CheckCircleIcon className="h-5 w-5 mr-1" />
+                                                    <span className="group-hover:underline">Đã xác nhận</span>
+                                                </a>
+                                            ) : (
+                                                <span className="text-gray-400">Chưa có</span>
+                                            )}
+                                        </td>
                                     </tr>
                                     )
-                                })
+                                )
                             ) : (
                                 <tr>
                                     <td colSpan={6} className="px-6 py-16 text-center text-gray-500">Chưa có dữ liệu KPI nào được thêm.</td>
@@ -156,55 +224,6 @@ const KpiManagementView: React.FC<{ project: Project; addKpiEntry: (projectId: s
                             )}
                         </tbody>
                     </table>
-                </div>
-            </div>
-            
-            <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                <h3 className="text-lg font-bold text-dark mb-4">Chi tiết từng tháng hợp đồng:</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                    {project.monthlyBreakdown.sort((a, b) => a.month - b.month).map(monthData => {
-                        const relevantKpis = project.kpiEntries.filter(k => k.contractMonth === monthData.month);
-                        const hasData = relevantKpis.length > 0;
-                        let latestKpi: KpiEntry | null = null;
-                        
-                        if (hasData) {
-                            relevantKpis.sort((a, b) => b.actualMonth.localeCompare(a.actualMonth));
-                            latestKpi = relevantKpis[0];
-                        }
-
-                        const isAchieved = hasData && latestKpi && latestKpi.kpiPercentage >= 75;
-
-                        let cardClasses = 'border rounded-lg p-3 text-center flex flex-col justify-center items-center h-32 transition-all duration-200 ';
-                        let statusContent = null;
-
-                        if (isAchieved) {
-                            cardClasses += 'bg-green-50 border-green-300';
-                            statusContent = (
-                                <>
-                                    <p className="text-2xl font-bold text-green-800 my-1">{latestKpi!.kpiPercentage}%</p>
-                                    <CheckCircleIcon className="h-6 w-6 text-green-500 mt-1" />
-                                </>
-                            );
-                        } else if (hasData) {
-                            cardClasses += 'bg-orange-50 border-orange-400';
-                            statusContent = (
-                                <>
-                                    <p className="text-2xl font-bold text-orange-800 my-1">{latestKpi!.kpiPercentage}%</p>
-                                    <p className="text-xs font-semibold text-orange-600 mt-1">Chưa đạt</p>
-                                </>
-                            );
-                        } else {
-                            cardClasses += 'bg-gray-100 border-gray-200';
-                            statusContent = <p className="text-sm text-gray-500 mt-1">Chưa có</p>;
-                        }
-
-                        return (
-                            <div key={monthData.month} className={cardClasses}>
-                                <p className="font-bold text-base text-slate-700">T{monthData.month}</p>
-                                {statusContent}
-                            </div>
-                        );
-                    })}
                 </div>
             </div>
         </div>
