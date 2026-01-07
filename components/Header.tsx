@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ChartBarIcon, QuestionMarkCircleIcon } from './Icons';
+import { ChartBarIcon } from './Icons';
 
 
 const Header: React.FC = () => {
@@ -14,14 +14,6 @@ const Header: React.FC = () => {
               SEO Management 2025
             </span>
           </Link>
-          <div className="flex items-center space-x-4">
-            <div className="text-sm text-secondary hidden sm:block">
-              Dành cho Account & Kế toán
-            </div>
-            <Link to="/setup" className="text-white hover:text-secondary transition-colors" title="Hướng dẫn cài đặt">
-              <QuestionMarkCircleIcon className="h-7 w-7" />
-            </Link>
-          </div>
         </div>
       </div>
     </header>

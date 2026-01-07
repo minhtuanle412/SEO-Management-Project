@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Project, PaymentStatus, KpiEntry } from '../types';
+import { Project, PaymentStatus, KpiEntry, PaymentType } from '../types';
 import ProgressBar from './ProgressBar';
 import { CalendarIcon, UserIcon, ClockIcon, DocumentReportIcon, CashIcon } from './Icons';
 import { format } from 'date-fns';
@@ -42,8 +42,41 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
   const actualDurationProgress = (actualMonthsWorked / project.durationMonths) * 100;
 
   // Calculate payment progress
-  const totalPaid = project.monthlyBreakdown.filter(m => m.paymentStatus === PaymentStatus.Paid).length;
-  const paymentProgress = (totalPaid / project.durationMonths) * 100;
+  let paymentProgress = 0;
+  let paymentPhaseText = '';
+  let paymentValueText = '';
+
+  const formatCurrency = (amount: number) => {
+    const roundedAmount = Math.round(amount);
+    if (roundedAmount >= 1_000_000_000) return `${(roundedAmount / 1_000_000_000).toFixed(0)}tỷ`;
+    if (roundedAmount >= 1_000_000) return `${(roundedAmount / 1_000_000).toFixed(0)}tr`;
+    if (roundedAmount >= 1_000) return `${(roundedAmount / 1_000).toFixed(0)}k`;
+    return roundedAmount.toLocaleString('vi-VN');
+  };
+
+  if (project.paymentType === PaymentType.Milestone) {
+    const totalPaidAmount = project.installments
+      .filter(inst => inst.status === PaymentStatus.Paid)
+      .reduce((sum, inst) => sum + (project.totalBudget * inst.paymentPercentage / 100), 0);
+    
+    paymentProgress = project.totalBudget > 0 ? (totalPaidAmount / project.totalBudget) * 100 : 0;
+    
+    const paidInstallments = project.installments.filter(inst => inst.status === PaymentStatus.Paid).length;
+    const totalInstallments = project.installments.length;
+    paymentPhaseText = `${paidInstallments}/${totalInstallments} đợt`;
+    
+    paymentValueText = `${formatCurrency(totalPaidAmount)} / ${formatCurrency(project.totalBudget)}`;
+
+  } else { // Monthly
+    const totalPaidMonths = project.monthlyBreakdown.filter(m => m.paymentStatus === PaymentStatus.Paid).length;
+    paymentProgress = project.durationMonths > 0 ? (totalPaidMonths / project.durationMonths) * 100 : 0;
+    paymentPhaseText = `${totalPaidMonths}/${project.durationMonths} tháng`;
+    
+    const monthlyAmount = project.durationMonths > 0 ? project.totalBudget / project.durationMonths : 0;
+    const totalPaidAmount = totalPaidMonths * monthlyAmount;
+    paymentValueText = `${formatCurrency(totalPaidAmount)} / ${formatCurrency(project.totalBudget)}`;
+  }
+
 
   const getStatus = () => {
     const today = new Date();
@@ -98,9 +131,12 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
                         <CashIcon className="h-4 w-4 mr-2 text-gray-400" />
                         Thanh toán
                     </span>
-                     <span className="font-bold text-green-600">{totalPaid}/{project.durationMonths} tháng</span>
+                     <span className="font-bold text-green-600">{paymentPhaseText}</span>
                 </div>
                 <ProgressBar progress={paymentProgress} color="bg-green-500" />
+                <div className="text-right text-xs text-gray-500 mt-1 font-medium">
+                    {paymentValueText}
+                </div>
             </div>
         </div>
 

@@ -8,7 +8,7 @@ import { PlusIcon } from './Icons';
 
 interface DashboardProps {
   projects: Project[];
-  addProject: (newProjectData: Omit<Project, 'id' | 'endDate' | 'monthlyBreakdown' | 'kpiEntries'>) => Promise<void>;
+  addProject: (newProjectData: Omit<Project, 'id' | 'endDate' | 'monthlyBreakdown' | 'kpiEntries' | 'installments' | 'lookerStudioUrl' | 'assignments'>) => Promise<void>;
 }
 
 type SortByType = 'startDateDesc' | 'startDateAsc' | 'clientAsc';
@@ -37,7 +37,7 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, addProject }) => {
   return (
     <div className="container mx-auto">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-        <h1 className="text-3xl font-bold text-dark">Bảng điều khiển dự án</h1>
+        <h1 className="text-3xl font-bold text-dark">Danh sách dự án</h1>
         <div className="flex items-center gap-4 w-full sm:w-auto">
           <select 
             id="sort" 

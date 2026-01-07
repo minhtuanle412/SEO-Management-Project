@@ -1,75 +1,16 @@
-import React, { useState, useCallback, useEffect, createContext, useContext } from 'react';
-import { HashRouter, Routes, Route } from 'react-router-dom';
-import { Project, MonthlyProgress, PaymentStatus, ReportStatus, KpiEntry } from './types';
+import React, { useState, useCallback, useEffect } from 'react';
+import { HashRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
+import { Project, MonthlyProgress, PaymentStatus, ReportStatus, KpiEntry, PaymentType, PaymentInstallment, CommissionStatus, Staff, ProjectAssignment, CommissionConfig, Department, Position } from './types';
 import Dashboard from './components/Dashboard';
 import ProjectDetail from './components/ProjectDetail';
-import Header from './components/Header';
 import SetupGuide from './components/SetupGuide';
+import ManagementPage from './components/ManagementPage';
+import CommissionReportPage from './components/CommissionReportPage';
+import CommissionPayrollPage from './components/CommissionPayrollPage';
 import { addMonths, format } from 'date-fns';
 import { supabase, areCredentialsPlaceholders } from './lib/supabaseClient';
-import { XCircleIcon, XIcon } from './components/Icons';
-
-// --- Toast Notification System ---
-type ToastMessage = {
-  id: number;
-  message: string;
-  type: 'success' | 'error';
-};
-
-type ToastContextType = {
-  addToast: (message: string, type: 'success' | 'error') => void;
-};
-
-const ToastContext = createContext<ToastContextType | undefined>(undefined);
-
-const Toast: React.FC<{ message: string; type: 'success' | 'error'; onClose: () => void; }> = ({ message, type, onClose }) => {
-  const baseClasses = 'relative w-full max-w-sm p-4 pr-10 rounded-lg shadow-lg flex items-start space-x-3 transition-all duration-300 animate-fade-in-right';
-  const typeClasses = {
-    success: 'bg-green-50 text-green-800 border border-green-200',
-    error: 'bg-red-50 text-red-800 border border-red-200',
-  };
-  return (
-    <div className={`${baseClasses} ${typeClasses[type]}`}>
-      <div className="flex-1 text-sm font-medium">{message}</div>
-      <button onClick={onClose} className="absolute top-1/2 right-2 -translate-y-1/2 text-current opacity-70 hover:opacity-100">
-        <XIcon className="h-5 w-5" />
-      </button>
-      <style>{`
-        @keyframes fade-in-right { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
-        .animate-fade-in-right { animation: fade-in-right 0.3s ease-out forwards; }
-      `}</style>
-    </div>
-  );
-};
-
-const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const removeToast = (id: number) => {
-    setToasts(prevToasts => prevToasts.filter(toast => toast.id !== id));
-  };
-  const addToast = useCallback((message: string, type: 'success' | 'error') => {
-    const id = Date.now();
-    setToasts(prevToasts => [...prevToasts, { id, message, type }]);
-    setTimeout(() => removeToast(id), 5000);
-  }, []);
-  return (
-    <ToastContext.Provider value={{ addToast }}>
-      {children}
-      <div className="fixed top-5 right-5 z-[100] space-y-2">
-        {toasts.map(toast => (
-          <Toast key={toast.id} message={toast.message} type={toast.type} onClose={() => removeToast(toast.id)} />
-        ))}
-      </div>
-    </ToastContext.Provider>
-  );
-};
-
-export const useToast = () => {
-  const context = useContext(ToastContext);
-  if (!context) throw new Error('useToast must be used within a ToastProvider');
-  return context;
-};
-// --- End Toast System ---
+import { XCircleIcon, ChartBarIcon, QuestionMarkCircleIcon, UsersIcon, PresentationChartLineIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, CurrencyDollarIcon } from './components/Icons';
+import { ToastProvider, useToast } from './contexts/ToastContext';
 
 // --- Data Mapping Layer ---
 const mapSupabaseKpiEntry = (entry: any): KpiEntry => ({
@@ -81,6 +22,8 @@ const mapSupabaseKpiEntry = (entry: any): KpiEntry => ({
   reportSentDate: entry.report_sent_date,
   notes: entry.notes,
   customerConfirmationUrl: entry.customer_confirmation_url,
+  commissionStatus: entry.commission_status,
+  commissionPaidDate: entry.commission_paid_date,
 });
 
 const mapSupabaseMonthlyBreakdown = (item: any): MonthlyProgress => ({
@@ -88,6 +31,22 @@ const mapSupabaseMonthlyBreakdown = (item: any): MonthlyProgress => ({
   month: item.month,
   paymentStatus: item.payment_status,
   paymentProofUrl: item.payment_proof_url,
+  installmentId: item.installment_id,
+});
+
+const mapSupabasePaymentInstallment = (item: any): PaymentInstallment => ({
+    id: item.id,
+    name: item.name,
+    paymentPercentage: item.payment_percentage,
+    status: item.status,
+    paymentProofUrl: item.payment_proof_url,
+});
+
+const mapSupabaseProjectAssignment = (item: any): ProjectAssignment => ({
+    id: item.id,
+    project_id: item.project_id,
+    nhan_su_id: item.nhan_su_id,
+    nhan_su: item.nhan_su,
 });
 
 const mapSupabaseProject = (project: any): Project => ({
@@ -97,8 +56,13 @@ const mapSupabaseProject = (project: any): Project => ({
   startDate: project.start_date,
   endDate: project.end_date,
   durationMonths: project.duration_months,
+  totalBudget: project.total_budget,
+  paymentType: project.payment_type,
   monthlyBreakdown: (project.monthlyBreakdown || []).map(mapSupabaseMonthlyBreakdown),
   kpiEntries: (project.kpiEntries || []).map(mapSupabaseKpiEntry),
+  installments: (project.installments || []).map(mapSupabasePaymentInstallment),
+  assignments: (project.assignments || []).map(mapSupabaseProjectAssignment),
+  lookerStudioUrl: project.looker_studio_url,
 });
 // --- End Data Mapping Layer ---
 
@@ -129,14 +93,110 @@ const SupabaseSetupInstructions: React.FC = () => (
   </div>
 );
 
+
+// --- Sidebar NavLink (for Desktop) ---
+const NavLink: React.FC<{ to: string; icon: React.ReactNode; label: string; isCollapsed: boolean }> = ({ to, icon, label, isCollapsed }) => {
+  const location = useLocation();
+  const isActive = location.pathname === to || (to === '/' && location.pathname.startsWith('/project'));
+
+  return (
+    <Link
+      to={to}
+      title={label}
+      className={`flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 ${isCollapsed ? 'justify-center' : ''} ${
+        isActive
+          ? 'bg-primary text-white'
+          : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+      }`}
+    >
+      {icon}
+      <span className={`ml-3 whitespace-nowrap ${isCollapsed ? 'hidden' : ''}`}>{label}</span>
+    </Link>
+  );
+};
+
+// --- Sidebar Component (for Desktop) ---
+const Sidebar: React.FC<{ isCollapsed: boolean; toggleSidebar: () => void; }> = ({ isCollapsed, toggleSidebar }) => {
+  return (
+    <aside className={`flex-shrink-0 bg-dark p-4 hidden sm:flex flex-col text-white transition-all duration-300 ease-in-out ${isCollapsed ? 'w-20' : 'w-64'}`}>
+      <Link to="/" className={`flex items-center space-x-3 px-2 mb-8 ${isCollapsed ? 'justify-center' : ''}`} title="SEO Management 2025 - Dashboard">
+        <ChartBarIcon className="h-8 w-8 text-white flex-shrink-0"/>
+        <span className={`text-xl font-bold text-white whitespace-nowrap ${isCollapsed ? 'hidden' : ''}`}>
+          SEO Management 2025
+        </span>
+      </Link>
+      
+      <nav className="w-full flex-grow flex flex-col space-y-2">
+        <NavLink to="/" icon={<ChartBarIcon className="h-6 w-6 flex-shrink-0" />} label="Danh sách dự án" isCollapsed={isCollapsed} />
+        <NavLink to="/commission-report" icon={<PresentationChartLineIcon className="h-6 w-6 flex-shrink-0" />} label="Hoa hồng theo dự án" isCollapsed={isCollapsed} />
+        <NavLink to="/commission-payroll" icon={<CurrencyDollarIcon className="h-6 w-6 flex-shrink-0" />} label="Hoa hồng theo cá nhân" isCollapsed={isCollapsed} />
+        <NavLink to="/management" icon={<UsersIcon className="h-6 w-6 flex-shrink-0" />} label="Quản lý" isCollapsed={isCollapsed} />
+      </nav>
+      
+      <div className="w-full mt-auto">
+        <NavLink to="/setup" icon={<QuestionMarkCircleIcon className="h-6 w-6 flex-shrink-0" />} label="Hướng dẫn cài đặt" isCollapsed={isCollapsed} />
+        <button
+          onClick={toggleSidebar}
+          className={`w-full flex items-center px-4 py-3 mt-2 text-sm font-medium text-gray-300 rounded-lg hover:bg-gray-700 hover:text-white ${isCollapsed ? 'justify-center' : ''}`}
+          title={isCollapsed ? "Mở rộng sidebar" : "Thu gọn sidebar"}
+        >
+          {isCollapsed ? <ChevronDoubleRightIcon className="h-6 w-6 flex-shrink-0" /> : <ChevronDoubleLeftIcon className="h-6 w-6 flex-shrink-0" />}
+          <span className={`ml-3 whitespace-nowrap ${isCollapsed ? 'hidden' : ''}`}>Thu gọn</span>
+        </button>
+      </div>
+    </aside>
+  );
+};
+
+// --- Bottom NavLink (for Mobile) ---
+const BottomNavLink: React.FC<{ to: string; icon: React.ReactNode; label: string }> = ({ to, icon, label }) => {
+  const location = useLocation();
+  const isActive = location.pathname === to || (to === '/' && location.pathname.startsWith('/project'));
+
+  return (
+    <Link
+      to={to}
+      className={`flex flex-col items-center justify-center flex-1 py-2 text-xs transition-colors duration-200 ${
+        isActive ? 'text-primary' : 'text-gray-500 hover:text-primary'
+      }`}
+    >
+      {icon}
+      <span className="mt-1 font-medium">{label}</span>
+    </Link>
+  );
+};
+
+// --- Bottom Navigation Bar Component (for Mobile) ---
+const BottomNavBar: React.FC = () => {
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-gray-200 flex sm:hidden z-40 shadow-[0_-2px_5px_rgba(0,0,0,0.05)]">
+      <BottomNavLink to="/" icon={<ChartBarIcon className="h-6 w-6" />} label="Dự án" />
+      <BottomNavLink to="/commission-report" icon={<PresentationChartLineIcon className="h-6 w-6" />} label="HH Dự án" />
+      <BottomNavLink to="/commission-payroll" icon={<CurrencyDollarIcon className="h-6 w-6" />} label="HH Cá nhân" />
+      <BottomNavLink to="/management" icon={<UsersIcon className="h-6 w-6" />} label="Quản lý" />
+      <BottomNavLink to="/setup" icon={<QuestionMarkCircleIcon className="h-6 w-6" />} label="Cài đặt" />
+    </nav>
+  );
+};
+
+
 const AppContent: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [commissionConfigs, setCommissionConfigs] = useState<CommissionConfig[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSupabaseConfigured] = useState(!areCredentialsPlaceholders());
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const { addToast } = useToast();
+  
+  const toggleSidebar = useCallback(() => {
+    setIsSidebarCollapsed(prev => !prev);
+  }, []);
 
-  const fetchProjects = useCallback(async () => {
+  const fetchAllData = useCallback(async () => {
     if (!isSupabaseConfigured) {
         setLoading(false);
         return;
@@ -144,24 +204,48 @@ const AppContent: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-        const { data, error: fetchError } = await supabase
-            .from('projects')
-            .select('*, kpiEntries:kpi_entries(*), monthlyBreakdown:monthly_breakdown(*)')
-            .order('start_date', { ascending: false });
+        const [
+            projectsRes,
+            staffRes,
+            commissionConfigsRes,
+            departmentsRes,
+            positionsRes,
+        ] = await Promise.all([
+            supabase.from('projects').select('*, kpiEntries:kpi_entries(*), monthlyBreakdown:monthly_breakdown(*), installments:payment_installments(*), assignments:phan_cong_du_an(*, nhan_su(*, chuc_vu(*), phong_ban(*)))').order('start_date', { ascending: false }),
+            supabase.from('nhan_su').select('*, chuc_vu(*), phong_ban(*)').order('ho_ten'),
+            supabase.from('cau_hinh_hoa_hong').select('*, chuc_vu(*)'),
+            supabase.from('phong_ban').select('*').order('name'),
+            supabase.from('chuc_vu').select('*').order('name'),
+        ]);
 
-        if (fetchError) {
-            console.error('Error fetching projects:', fetchError);
-            const errorMessage = fetchError.message || 'An unknown error occurred while fetching data.';
-            if (errorMessage.includes("relation \"projects\" does not exist")) {
-                setError(`Lỗi cơ sở dữ liệu: Không tìm thấy bảng 'projects'. Vui lòng đảm bảo bạn đã chạy các câu lệnh SQL cần thiết trong Supabase SQL Editor để tạo các bảng.`);
-            } else if (errorMessage.includes("violates row-level security policy")) {
-                setError(`Lỗi bảo mật: Quyền truy cập vào các dự án bị từ chối. Vui lòng kiểm tra các chính sách Row Level Security (RLS) trên các bảng của bạn và đảm bảo chúng cho phép quyền đọc (SELECT).`);
-            } else {
-                setError(`Không thể tải dự án: ${errorMessage}`);
-            }
-            setProjects([]);
-        } else if (data) {
-            setProjects(data.map(mapSupabaseProject));
+        let combinedError = '';
+        if (projectsRes.error) combinedError += `Projects: ${projectsRes.error.message}\n`;
+        if (staffRes.error) combinedError += `Staff: ${staffRes.error.message}\n`;
+        if (commissionConfigsRes.error) combinedError += `Commission Configs: ${commissionConfigsRes.error.message}\n`;
+        if (departmentsRes.error) combinedError += `Departments: ${departmentsRes.error.message}\n`;
+        if (positionsRes.error) combinedError += `Positions: ${positionsRes.error.message}\n`;
+
+        if (combinedError) {
+             console.error('Error fetching data:', combinedError);
+             const errorMessage = combinedError;
+             if (errorMessage.includes("does not exist")) {
+                 setError(`Lỗi cơ sở dữ liệu: Một hoặc nhiều bảng (projects, nhan_su, etc.) không tồn tại. Vui lòng chạy các câu lệnh SQL trong Hướng dẫn Cài đặt.`);
+             } else if (errorMessage.includes("violates row-level security policy")) {
+                 setError(`Lỗi bảo mật: Quyền truy cập bị từ chối. Vui lòng kiểm tra chính sách RLS trên các bảng và đảm bảo chúng cho phép quyền đọc (SELECT).`);
+             } else {
+                 setError(`Không thể tải dữ liệu: ${errorMessage}`);
+             }
+             setProjects([]);
+             setStaff([]);
+             setCommissionConfigs([]);
+             setDepartments([]);
+             setPositions([]);
+        } else {
+            setProjects(projectsRes.data?.map(mapSupabaseProject) || []);
+            setStaff(staffRes.data as Staff[] || []);
+            setCommissionConfigs(commissionConfigsRes.data as CommissionConfig[] || []);
+            setDepartments(departmentsRes.data || []);
+            setPositions(positionsRes.data || []);
         }
     } catch (err: unknown) {
         console.error('An unexpected error occurred:', err);
@@ -176,11 +260,12 @@ const AppContent: React.FC = () => {
     }
 }, [isSupabaseConfigured]);
 
-  useEffect(() => {
-    fetchProjects();
-  }, [fetchProjects]);
 
- const addProject = useCallback(async (newProjectData: Omit<Project, 'id' | 'endDate' | 'monthlyBreakdown' | 'kpiEntries'>) => {
+  useEffect(() => {
+    fetchAllData();
+  }, [fetchAllData]);
+
+ const addProject = useCallback(async (newProjectData: Omit<Project, 'id' | 'endDate' | 'monthlyBreakdown' | 'kpiEntries' | 'installments' | 'lookerStudioUrl' | 'assignments'>) => {
     if (!isSupabaseConfigured) return;
     try {
         const startDate = new Date(newProjectData.startDate);
@@ -192,6 +277,8 @@ const AppContent: React.FC = () => {
           start_date: newProjectData.startDate,
           end_date: format(endDate, 'yyyy-MM-dd'),
           duration_months: newProjectData.durationMonths,
+          total_budget: newProjectData.totalBudget,
+          payment_type: newProjectData.paymentType,
         };
 
         const { data: newProject, error } = await supabase.from('projects').insert(projectToInsert).select().single();
@@ -204,6 +291,8 @@ const AppContent: React.FC = () => {
             
             if (errorMessageStr.toLowerCase().includes('security policy')) {
                 userFriendlyMessage = `Lỗi quyền truy cập: Không thể thêm dự án. Vui lòng kiểm tra chính sách RLS trên bảng "projects" và đảm bảo quyền INSERT được bật. Tham khảo trang Hướng dẫn Cài đặt.`;
+            } else if (errorMessageStr.includes("violates check constraint") && errorMessageStr.includes("total_budget_positive")) {
+                 userFriendlyMessage = `Lỗi dữ liệu: Tổng ngân sách phải là một số dương.`;
             }
             addToast(userFriendlyMessage, 'error');
             return;
@@ -224,17 +313,19 @@ const AppContent: React.FC = () => {
             return;
         }
         addToast(`Dự án "${newProject.name}" đã được thêm thành công!`, 'success');
-        await fetchProjects();
+        await fetchAllData();
     } catch (err: unknown) {
         console.error('An unexpected error occurred while adding project:', err);
         const errorMessage = err instanceof Error ? err.message : String(err);
         addToast(`Đã xảy ra lỗi không mong muốn: ${errorMessage}`, 'error');
     }
-}, [fetchProjects, isSupabaseConfigured, addToast]);
+}, [fetchAllData, isSupabaseConfigured, addToast]);
 
-const addKpiEntry = useCallback(async (projectId: string, newEntryData: Omit<KpiEntry, 'id'>) => {
+const addKpiEntry = useCallback(async (projectId: string, newEntryData: Omit<KpiEntry, 'id' | 'commissionStatus' | 'commissionPaidDate'>) => {
     if (!isSupabaseConfigured) return;
     try {
+        const commissionStatus = newEntryData.kpiPercentage >= 75 ? CommissionStatus.Unpaid : CommissionStatus.NotApplicable;
+
         const entryToInsert = {
             project_id: projectId,
             contract_month: newEntryData.contractMonth,
@@ -243,6 +334,7 @@ const addKpiEntry = useCallback(async (projectId: string, newEntryData: Omit<Kpi
             notes: newEntryData.notes,
             report_status: newEntryData.reportStatus,
             report_sent_date: newEntryData.reportSentDate,
+            commission_status: commissionStatus,
         };
         const { data: newEntry, error } = await supabase.from('kpi_entries').insert(entryToInsert).select().single();
 
@@ -259,13 +351,13 @@ const addKpiEntry = useCallback(async (projectId: string, newEntryData: Omit<Kpi
             return;
         }
         addToast('Đã thêm mục KPI mới thành công!', 'success');
-        await fetchProjects();
+        await fetchAllData();
     } catch (err: unknown) {
         console.error('An unexpected error occurred while adding KPI entry:', err);
         const errorMessage = err instanceof Error ? err.message : String(err);
         addToast(`Đã xảy ra lỗi không mong muốn: ${errorMessage}`, 'error');
     }
-}, [fetchProjects, isSupabaseConfigured, addToast]);
+}, [fetchAllData, isSupabaseConfigured, addToast]);
 
 const updateKpiEntry = useCallback(async (kpiEntryId: string, updates: Partial<Pick<KpiEntry, 'reportStatus' | 'reportSentDate'>>) => {
     if (!isSupabaseConfigured) return;
@@ -294,13 +386,13 @@ const updateKpiEntry = useCallback(async (kpiEntryId: string, updates: Partial<P
         }
 
         addToast('Trạng thái báo cáo đã được cập nhật.', 'success');
-        await fetchProjects();
+        await fetchAllData();
     } catch (err: unknown) {
         console.error('An unexpected error occurred while updating KPI entry:', err);
         const errorMessage = err instanceof Error ? err.message : String(err);
         addToast(`Đã xảy ra lỗi không mong muốn: ${errorMessage}`, 'error');
     }
-}, [fetchProjects, isSupabaseConfigured, addToast]);
+}, [fetchAllData, isSupabaseConfigured, addToast]);
 
 
 const updateMonthlyPayment = useCallback(async (monthId: string, proofUrl: string) => {
@@ -329,13 +421,46 @@ const updateMonthlyPayment = useCallback(async (monthId: string, proofUrl: strin
             return;
         }
         addToast('Trạng thái thanh toán đã được cập nhật thành công!', 'success');
-        await fetchProjects();
+        await fetchAllData();
     } catch (err: unknown) {
         console.error('An unexpected error occurred while updating payment:', err);
         const errorMessage = err instanceof Error ? err.message : String(err);
         addToast(`Đã xảy ra lỗi không mong muốn: ${errorMessage}`, 'error');
     }
-}, [fetchProjects, isSupabaseConfigured, addToast]);
+}, [fetchAllData, isSupabaseConfigured, addToast]);
+
+const updateInstallmentPayment = useCallback(async (installmentId: string, proofUrl: string) => {
+    if (!isSupabaseConfigured) return;
+    try {
+        const { error } = await supabase
+            .from('payment_installments')
+            .update({ 
+                status: PaymentStatus.Paid,
+                payment_proof_url: proofUrl,
+            })
+            .match({ id: installmentId });
+
+        if (error) {
+            console.error("Error updating installment payment status:", error);
+            const errorMessageStr = String(error.message || 'Lỗi không xác định.');
+            const errorDetailsStr = error.details ? ` (${error.details})` : '';
+            let userFriendlyMessage = `Lỗi khi cập nhật thanh toán đợt: ${errorMessageStr}${errorDetailsStr}`;
+
+            if (errorMessageStr.toLowerCase().includes('security policy') || errorMessageStr.toLowerCase().includes('permission denied')) {
+                userFriendlyMessage = `Lỗi quyền truy cập: Không thể cập nhật thanh toán. Vui lòng kiểm tra chính sách RLS trên bảng "payment_installments" và đảm bảo quyền UPDATE được bật.`;
+            }
+            addToast(userFriendlyMessage, 'error');
+            return;
+        }
+        addToast('Trạng thái thanh toán đợt đã được cập nhật thành công!', 'success');
+        await fetchAllData();
+    } catch (err: unknown) {
+        console.error('An unexpected error occurred while updating installment payment:', err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        addToast(`Đã xảy ra lỗi không mong muốn: ${errorMessage}`, 'error');
+    }
+}, [fetchAllData, isSupabaseConfigured, addToast]);
+
 
 const updateKpiConfirmation = useCallback(async (kpiEntryId: string, confirmationUrl: string) => {
     if (!isSupabaseConfigured) return;
@@ -359,13 +484,13 @@ const updateKpiConfirmation = useCallback(async (kpiEntryId: string, confirmatio
         }
 
         addToast('Đã cập nhật xác nhận của khách hàng thành công!', 'success');
-        await fetchProjects();
+        await fetchAllData();
     } catch (err: unknown) {
         console.error('An unexpected error occurred while updating KPI confirmation:', err);
         const errorMessage = err instanceof Error ? err.message : String(err);
         addToast(`Đã xảy ra lỗi không mong muốn: ${errorMessage}`, 'error');
     }
-}, [fetchProjects, isSupabaseConfigured, addToast]);
+}, [fetchAllData, isSupabaseConfigured, addToast]);
 
 const updateProjectName = useCallback(async (projectId: string, newName: string) => {
     if (!isSupabaseConfigured) return;
@@ -389,13 +514,75 @@ const updateProjectName = useCallback(async (projectId: string, newName: string)
         }
 
         addToast('Tên dự án đã được cập nhật thành công!', 'success');
-        await fetchProjects();
+        await fetchAllData();
     } catch (err: unknown) {
         console.error('An unexpected error occurred while updating project name:', err);
         const errorMessage = err instanceof Error ? err.message : String(err);
         addToast(`Đã xảy ra lỗi không mong muốn: ${errorMessage}`, 'error');
     }
-}, [fetchProjects, isSupabaseConfigured, addToast]);
+}, [fetchAllData, isSupabaseConfigured, addToast]);
+
+const updateLookerStudioUrl = useCallback(async (projectId: string, url: string | null) => {
+    if (!isSupabaseConfigured) return;
+    try {
+        const { error } = await supabase
+            .from('projects')
+            .update({ looker_studio_url: url })
+            .match({ id: projectId });
+
+        if (error) {
+            console.error("Error updating Looker Studio URL:", error);
+            const errorMessageStr = String(error.message || 'Lỗi không xác định.');
+            const errorDetailsStr = error.details ? ` (${error.details})` : '';
+            let userFriendlyMessage = `Lỗi khi cập nhật URL báo cáo: ${errorMessageStr}${errorDetailsStr}`;
+
+            if (errorMessageStr.toLowerCase().includes('security policy')) {
+                userFriendlyMessage = `Lỗi quyền truy cập: Không thể cập nhật URL. Vui lòng kiểm tra chính sách RLS trên bảng "projects" và đảm bảo quyền UPDATE được bật.`;
+            }
+            addToast(userFriendlyMessage, 'error');
+            return;
+        }
+
+        addToast('URL báo cáo hiệu suất đã được cập nhật thành công!', 'success');
+        await fetchAllData();
+    } catch (err: unknown) {
+        console.error('An unexpected error occurred while updating Looker Studio URL:', err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        addToast(`Đã xảy ra lỗi không mong muốn: ${errorMessage}`, 'error');
+    }
+}, [fetchAllData, isSupabaseConfigured, addToast]);
+
+const updateKpiCommissionStatus = useCallback(async (kpiEntryId: string) => {
+    if (!isSupabaseConfigured) return;
+    try {
+        const { error } = await supabase
+            .from('kpi_entries')
+            .update({
+                commission_status: CommissionStatus.Paid,
+                commission_paid_date: format(new Date(), 'yyyy-MM-dd'),
+            })
+            .match({ id: kpiEntryId });
+
+        if (error) {
+            console.error("Error updating commission status:", error);
+            const errorMessageStr = String(error.message || 'Lỗi không xác định.');
+            const errorDetailsStr = error.details ? ` (${error.details})` : '';
+            let userFriendlyMessage = `Lỗi khi cập nhật hoa hồng: ${errorMessageStr}${errorDetailsStr}`;
+
+            if (errorMessageStr.toLowerCase().includes('security policy')) {
+                userFriendlyMessage = `Lỗi quyền truy cập: Không thể cập nhật hoa hồng. Vui lòng kiểm tra chính sách RLS trên bảng "kpi_entries".`;
+            }
+            addToast(userFriendlyMessage, 'error');
+            return;
+        }
+        addToast('Trạng thái hoa hồng đã được cập nhật thành công!', 'success');
+        await fetchAllData();
+    } catch (err: unknown) {
+        console.error('An unexpected error occurred while updating commission status:', err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        addToast(`Đã xảy ra lỗi không mong muốn: ${errorMessage}`, 'error');
+    }
+}, [fetchAllData, isSupabaseConfigured, addToast]);
 
 
   if (!isSupabaseConfigured) {
@@ -405,7 +592,7 @@ const updateProjectName = useCallback(async (projectId: string, newName: string)
   if (loading) {
       return (
           <div className="flex justify-center items-center min-h-screen">
-              <div className="text-2xl font-bold text-primary">Đang tải dự án...</div>
+              <div className="text-2xl font-bold text-primary">Đang tải dữ liệu...</div>
           </div>
       )
   }
@@ -446,7 +633,7 @@ const updateProjectName = useCallback(async (projectId: string, newName: string)
             
             <div className="text-center">
                 <button
-                    onClick={fetchProjects}
+                    onClick={fetchAllData}
                     className="mt-8 bg-primary text-white font-bold py-2 px-8 rounded-lg shadow-md hover:bg-blue-700 transition duration-300"
                   >
                     Thử lại
@@ -460,15 +647,34 @@ const updateProjectName = useCallback(async (projectId: string, newName: string)
 
   return (
     <HashRouter>
-      <div className="min-h-screen bg-light text-dark font-sans">
-        <Header />
-        <main className="p-4 sm:p-6 lg:p-8">
+      <div className="flex h-screen bg-light text-dark font-sans">
+        <Sidebar isCollapsed={isSidebarCollapsed} toggleSidebar={toggleSidebar} />
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 pb-24 sm:pb-6">
           <Routes>
             <Route path="/" element={<Dashboard projects={projects} addProject={addProject} />} />
-            <Route path="/project/:projectSlug" element={<ProjectDetail projects={projects} addKpiEntry={addKpiEntry} updateMonthlyPayment={updateMonthlyPayment} updateKpiEntry={updateKpiEntry} updateKpiConfirmation={updateKpiConfirmation} updateProjectName={updateProjectName} />} />
+            <Route 
+              path="/project/:projectSlug" 
+              element={<ProjectDetail 
+                projects={projects}
+                allStaff={staff}
+                addKpiEntry={addKpiEntry} 
+                updateMonthlyPayment={updateMonthlyPayment} 
+                updateInstallmentPayment={updateInstallmentPayment}
+                updateKpiEntry={updateKpiEntry} 
+                updateKpiConfirmation={updateKpiConfirmation} 
+                updateProjectName={updateProjectName} 
+                updateLookerStudioUrl={updateLookerStudioUrl}
+                updateKpiCommissionStatus={updateKpiCommissionStatus}
+                fetchProjects={fetchAllData} 
+              />} 
+            />
             <Route path="/setup" element={<SetupGuide />} />
+            <Route path="/management" element={<ManagementPage staff={staff} commissionConfigs={commissionConfigs} departments={departments} positions={positions} refetchData={fetchAllData} />} />
+            <Route path="/commission-report" element={<CommissionReportPage projects={projects} staff={staff} commissionConfigs={commissionConfigs} />} />
+            <Route path="/commission-payroll" element={<CommissionPayrollPage projects={projects} staff={staff} commissionConfigs={commissionConfigs} />} />
           </Routes>
         </main>
+        <BottomNavBar />
       </div>
     </HashRouter>
   );

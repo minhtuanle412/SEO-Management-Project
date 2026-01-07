@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { Project } from '../types';
+import { Project, PaymentType } from '../types';
 import { XIcon } from './Icons';
-import { useToast } from '../App';
+import { useToast } from '../contexts/ToastContext';
 
 interface AddProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddProject: (newProjectData: Omit<Project, 'id' | 'endDate' | 'monthlyBreakdown' | 'kpiEntries'>) => Promise<void>;
+  onAddProject: (newProjectData: Omit<Project, 'id' | 'endDate' | 'monthlyBreakdown' | 'kpiEntries' | 'installments' | 'lookerStudioUrl' | 'assignments'>) => Promise<void>;
 }
 
 const AddProjectModal: React.FC<AddProjectModalProps> = ({ isOpen, onClose, onAddProject }) => {
@@ -14,6 +14,8 @@ const AddProjectModal: React.FC<AddProjectModalProps> = ({ isOpen, onClose, onAd
   const [client, setClient] = useState('');
   const [startDate, setStartDate] = useState('');
   const [durationMonths, setDurationMonths] = useState(6);
+  const [totalBudget, setTotalBudget] = useState<number | ''>('');
+  const [paymentType, setPaymentType] = useState<PaymentType>(PaymentType.Monthly);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { addToast } = useToast();
 
@@ -21,12 +23,12 @@ const AddProjectModal: React.FC<AddProjectModalProps> = ({ isOpen, onClose, onAd
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !client || !startDate || durationMonths <= 0) {
-      addToast('Vui lòng điền đầy đủ tất cả các trường thông tin.', 'error');
+    if (!name || !client || !startDate || durationMonths <= 0 || !totalBudget || totalBudget <= 0) {
+      addToast('Vui lòng điền đầy đủ và chính xác tất cả các trường thông tin.', 'error');
       return;
     }
     setIsSubmitting(true);
-    await onAddProject({ name, client, startDate, durationMonths });
+    await onAddProject({ name, client, startDate, durationMonths, totalBudget: Number(totalBudget), paymentType });
     setIsSubmitting(false);
     onClose();
     // Reset form
@@ -34,6 +36,8 @@ const AddProjectModal: React.FC<AddProjectModalProps> = ({ isOpen, onClose, onAd
     setClient('');
     setStartDate('');
     setDurationMonths(6);
+    setTotalBudget('');
+    setPaymentType(PaymentType.Monthly);
   };
 
   return (
@@ -54,6 +58,23 @@ const AddProjectModal: React.FC<AddProjectModalProps> = ({ isOpen, onClose, onAd
             <div>
               <label htmlFor="client" className="block text-sm font-medium text-gray-700">Tên khách hàng</label>
               <input type="text" id="client" value={client} onChange={e => setClient(e.target.value)} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm" required disabled={isSubmitting} />
+            </div>
+            <div>
+              <label htmlFor="totalBudget" className="block text-sm font-medium text-gray-700">Tổng ngân sách dự án (VNĐ)</label>
+              <input type="number" id="totalBudget" value={totalBudget} onChange={e => setTotalBudget(e.target.value === '' ? '' : Number(e.target.value))} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm" min="1" required disabled={isSubmitting} placeholder="VD: 100000000" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Hình thức thanh toán</label>
+              <div className="mt-2 flex gap-1 rounded-md border border-gray-300 p-1 bg-gray-100">
+                  <label className="flex-1 text-center p-2 rounded-md cursor-pointer transition-all duration-200" style={{backgroundColor: paymentType === PaymentType.Monthly ? 'white' : 'transparent', color: paymentType === PaymentType.Monthly ? '#1D4ED8' : '#374151', fontWeight: paymentType === PaymentType.Monthly ? '600' : '400', boxShadow: paymentType === PaymentType.Monthly ? '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)' : 'none'}}>
+                      <input type="radio" className="sr-only" name="paymentType" value={PaymentType.Monthly} checked={paymentType === PaymentType.Monthly} onChange={() => setPaymentType(PaymentType.Monthly)} disabled={isSubmitting} />
+                      <span>Theo tháng</span>
+                  </label>
+                  <label className="flex-1 text-center p-2 rounded-md cursor-pointer transition-all duration-200" style={{backgroundColor: paymentType === PaymentType.Milestone ? 'white' : 'transparent', color: paymentType === PaymentType.Milestone ? '#1D4ED8' : '#374151', fontWeight: paymentType === PaymentType.Milestone ? '600' : '400', boxShadow: paymentType === PaymentType.Milestone ? '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)' : 'none'}}>
+                      <input type="radio" className="sr-only" name="paymentType" value={PaymentType.Milestone} checked={paymentType === PaymentType.Milestone} onChange={() => setPaymentType(PaymentType.Milestone)} disabled={isSubmitting} />
+                      <span>Theo đợt</span>
+                  </label>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
