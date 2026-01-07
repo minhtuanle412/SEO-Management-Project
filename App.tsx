@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
 import { Project, MonthlyProgress, PaymentStatus, ReportStatus, KpiEntry, PaymentType, PaymentInstallment, CommissionStatus, Staff, ProjectAssignment, CommissionConfig, Department, Position } from './types';
@@ -7,10 +8,12 @@ import SetupGuide from './components/SetupGuide';
 import ManagementPage from './components/ManagementPage';
 import CommissionReportPage from './components/CommissionReportPage';
 import CommissionPayrollPage from './components/CommissionPayrollPage';
+import LoginPage from './components/LoginPage';
 import { addMonths, format } from 'date-fns';
 import { supabase, areCredentialsPlaceholders } from './lib/supabaseClient';
 import { XCircleIcon, ChartBarIcon, QuestionMarkCircleIcon, UsersIcon, PresentationChartLineIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, CurrencyDollarIcon } from './components/Icons';
 import { ToastProvider, useToast } from './contexts/ToastContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 
 // --- Data Mapping Layer ---
 const mapSupabaseKpiEntry = (entry: any): KpiEntry => ({
@@ -117,12 +120,14 @@ const NavLink: React.FC<{ to: string; icon: React.ReactNode; label: string; isCo
 
 // --- Sidebar Component (for Desktop) ---
 const Sidebar: React.FC<{ isCollapsed: boolean; toggleSidebar: () => void; }> = ({ isCollapsed, toggleSidebar }) => {
+  const { user, signOut } = useAuth();
+
   return (
     <aside className={`flex-shrink-0 bg-dark p-4 hidden sm:flex flex-col text-white transition-all duration-300 ease-in-out ${isCollapsed ? 'w-20' : 'w-64'}`}>
       <Link to="/" className={`flex items-center space-x-3 px-2 mb-8 ${isCollapsed ? 'justify-center' : ''}`} title="SEO Management 2025 - Dashboard">
         <ChartBarIcon className="h-8 w-8 text-white flex-shrink-0"/>
         <span className={`text-xl font-bold text-white whitespace-nowrap ${isCollapsed ? 'hidden' : ''}`}>
-          SEO Management 2025
+          SEO Management
         </span>
       </Link>
       
@@ -134,7 +139,26 @@ const Sidebar: React.FC<{ isCollapsed: boolean; toggleSidebar: () => void; }> = 
       </nav>
       
       <div className="w-full mt-auto">
+        {!isCollapsed && user && (
+            <div className="mb-4 px-2 text-xs text-gray-400 truncate">
+                Đăng nhập: <br/>
+                <span className="text-white" title={user.email}>{user.email}</span>
+            </div>
+        )}
+        
         <NavLink to="/setup" icon={<QuestionMarkCircleIcon className="h-6 w-6 flex-shrink-0" />} label="Hướng dẫn cài đặt" isCollapsed={isCollapsed} />
+        
+        <button
+            onClick={signOut}
+            className={`w-full flex items-center px-4 py-3 mt-2 text-sm font-medium text-red-300 rounded-lg hover:bg-gray-700 hover:text-red-100 ${isCollapsed ? 'justify-center' : ''}`}
+            title="Đăng xuất"
+        >
+             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            <span className={`ml-3 whitespace-nowrap ${isCollapsed ? 'hidden' : ''}`}>Đăng xuất</span>
+        </button>
+
         <button
           onClick={toggleSidebar}
           className={`w-full flex items-center px-4 py-3 mt-2 text-sm font-medium text-gray-300 rounded-lg hover:bg-gray-700 hover:text-white ${isCollapsed ? 'justify-center' : ''}`}
@@ -168,13 +192,22 @@ const BottomNavLink: React.FC<{ to: string; icon: React.ReactNode; label: string
 
 // --- Bottom Navigation Bar Component (for Mobile) ---
 const BottomNavBar: React.FC = () => {
+    const { signOut } = useAuth();
   return (
     <nav className="fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-gray-200 flex sm:hidden z-40 shadow-[0_-2px_5px_rgba(0,0,0,0.05)]">
       <BottomNavLink to="/" icon={<ChartBarIcon className="h-6 w-6" />} label="Dự án" />
       <BottomNavLink to="/commission-report" icon={<PresentationChartLineIcon className="h-6 w-6" />} label="HH Dự án" />
       <BottomNavLink to="/commission-payroll" icon={<CurrencyDollarIcon className="h-6 w-6" />} label="HH Cá nhân" />
       <BottomNavLink to="/management" icon={<UsersIcon className="h-6 w-6" />} label="Quản lý" />
-      <BottomNavLink to="/setup" icon={<QuestionMarkCircleIcon className="h-6 w-6" />} label="Cài đặt" />
+      <button
+        onClick={signOut}
+        className="flex flex-col items-center justify-center flex-1 py-2 text-xs text-gray-500 hover:text-red-500"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+        </svg>
+        <span className="mt-1 font-medium">Đăng xuất</span>
+      </button>
     </nav>
   );
 };
@@ -191,13 +224,15 @@ const AppContent: React.FC = () => {
   const [isSupabaseConfigured] = useState(!areCredentialsPlaceholders());
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const { addToast } = useToast();
+  const { user, loading: authLoading } = useAuth(); // Auth Hook
   
   const toggleSidebar = useCallback(() => {
     setIsSidebarCollapsed(prev => !prev);
   }, []);
 
   const fetchAllData = useCallback(async () => {
-    if (!isSupabaseConfigured) {
+    // Only fetch if config is valid AND user is logged in
+    if (!isSupabaseConfigured || !user) {
         setLoading(false);
         return;
     }
@@ -258,12 +293,14 @@ const AppContent: React.FC = () => {
     } finally {
         setLoading(false);
     }
-}, [isSupabaseConfigured]);
+  }, [isSupabaseConfigured, user]); // Add user dependency
 
 
   useEffect(() => {
-    fetchAllData();
-  }, [fetchAllData]);
+    if (user) {
+        fetchAllData();
+    }
+  }, [fetchAllData, user]);
 
  const addProject = useCallback(async (newProjectData: Omit<Project, 'id' | 'endDate' | 'monthlyBreakdown' | 'kpiEntries' | 'installments' | 'lookerStudioUrl' | 'assignments'>) => {
     if (!isSupabaseConfigured) return;
@@ -585,10 +622,31 @@ const updateKpiCommissionStatus = useCallback(async (kpiEntryId: string) => {
 }, [fetchAllData, isSupabaseConfigured, addToast]);
 
 
+  // 1. Check Config First
   if (!isSupabaseConfigured) {
     return <SupabaseSetupInstructions />;
   }
 
+  // 2. Check Auth State
+  if (authLoading) {
+      return (
+          <div className="flex justify-center items-center min-h-screen">
+              <div className="text-2xl font-bold text-primary">Đang tải...</div>
+          </div>
+      )
+  }
+
+  // 3. If no user, show Login Page or Setup Route
+  if (!user) {
+      return (
+        <Routes>
+            <Route path="/setup" element={<div className="h-screen w-full overflow-y-auto bg-light p-4"><SetupGuide /></div>} />
+            <Route path="*" element={<LoginPage />} />
+        </Routes>
+      );
+  }
+
+  // 4. Data Loading state (after auth is confirmed)
   if (loading) {
       return (
           <div className="flex justify-center items-center min-h-screen">
@@ -597,6 +655,7 @@ const updateKpiCommissionStatus = useCallback(async (kpiEntryId: string) => {
       )
   }
 
+ // 5. Data Error State
  if (error) {
     return (
       <div className="min-h-screen bg-light flex items-center justify-center p-4">
@@ -623,7 +682,7 @@ const updateKpiCommissionStatus = useCallback(async (kpiEntryId: string) => {
                         <strong>Thiết lập cơ sở dữ liệu:</strong> Nếu bạn thấy lỗi "relation does not exist", điều đó có nghĩa là các bảng của bạn chưa được tạo. Bạn cần chạy các lệnh SQL để thiết lập schema trong Supabase SQL Editor.
                     </li>
                     <li>
-                        <strong>Kiểm tra chính sách RLS:</strong> Lỗi "violates row-level security policy" có nghĩa là bạn cần thiết lập các quy tắc trong Supabase để cho phép ứng dụng đọc dữ liệu từ các bảng của bạn. Hãy đảm bảo bạn có chính sách `SELECT` cho người dùng `anon`.
+                        <strong>Kiểm tra chính sách RLS:</strong> Lỗi "violates row-level security policy" có nghĩa là bạn cần thiết lập các quy tắc trong Supabase để cho phép ứng dụng đọc dữ liệu từ các bảng của bạn. Hãy đảm bảo bạn có chính sách `SELECT` cho người dùng `anon` hoặc `authenticated`.
                     </li>
                      <li>
                         <strong>Kiểm tra kết nối mạng:</strong> Đảm bảo bạn có kết nối internet ổn định.
@@ -644,47 +703,49 @@ const updateKpiCommissionStatus = useCallback(async (kpiEntryId: string) => {
     );
   }
 
-
+  // 6. Main App Layout (Authenticated)
   return (
-    <HashRouter>
-      <div className="flex h-screen bg-light text-dark font-sans">
-        <Sidebar isCollapsed={isSidebarCollapsed} toggleSidebar={toggleSidebar} />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 pb-24 sm:pb-6">
-          <Routes>
-            <Route path="/" element={<Dashboard projects={projects} addProject={addProject} />} />
-            <Route 
-              path="/project/:projectSlug" 
-              element={<ProjectDetail 
-                projects={projects}
-                allStaff={staff}
-                addKpiEntry={addKpiEntry} 
-                updateMonthlyPayment={updateMonthlyPayment} 
-                updateInstallmentPayment={updateInstallmentPayment}
-                updateKpiEntry={updateKpiEntry} 
-                updateKpiConfirmation={updateKpiConfirmation} 
-                updateProjectName={updateProjectName} 
-                updateLookerStudioUrl={updateLookerStudioUrl}
-                updateKpiCommissionStatus={updateKpiCommissionStatus}
-                fetchProjects={fetchAllData} 
-              />} 
-            />
-            <Route path="/setup" element={<SetupGuide />} />
-            <Route path="/management" element={<ManagementPage staff={staff} commissionConfigs={commissionConfigs} departments={departments} positions={positions} refetchData={fetchAllData} />} />
-            <Route path="/commission-report" element={<CommissionReportPage projects={projects} staff={staff} commissionConfigs={commissionConfigs} />} />
-            <Route path="/commission-payroll" element={<CommissionPayrollPage projects={projects} staff={staff} commissionConfigs={commissionConfigs} />} />
-          </Routes>
-        </main>
-        <BottomNavBar />
-      </div>
-    </HashRouter>
+    <div className="flex h-screen bg-light text-dark font-sans">
+      <Sidebar isCollapsed={isSidebarCollapsed} toggleSidebar={toggleSidebar} />
+      <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 pb-24 sm:pb-6">
+        <Routes>
+          <Route path="/" element={<Dashboard projects={projects} addProject={addProject} />} />
+          <Route 
+            path="/project/:projectSlug" 
+            element={<ProjectDetail 
+              projects={projects}
+              allStaff={staff}
+              addKpiEntry={addKpiEntry} 
+              updateMonthlyPayment={updateMonthlyPayment} 
+              updateInstallmentPayment={updateInstallmentPayment}
+              updateKpiEntry={updateKpiEntry} 
+              updateKpiConfirmation={updateKpiConfirmation} 
+              updateProjectName={updateProjectName} 
+              updateLookerStudioUrl={updateLookerStudioUrl}
+              updateKpiCommissionStatus={updateKpiCommissionStatus}
+              fetchProjects={fetchAllData} 
+            />} 
+          />
+          <Route path="/setup" element={<SetupGuide />} />
+          <Route path="/management" element={<ManagementPage staff={staff} commissionConfigs={commissionConfigs} departments={departments} positions={positions} refetchData={fetchAllData} />} />
+          <Route path="/commission-report" element={<CommissionReportPage projects={projects} staff={staff} commissionConfigs={commissionConfigs} />} />
+          <Route path="/commission-payroll" element={<CommissionPayrollPage projects={projects} staff={staff} commissionConfigs={commissionConfigs} />} />
+        </Routes>
+      </main>
+      <BottomNavBar />
+    </div>
   );
 };
 
 
 const App: React.FC = () => (
-  <ToastProvider>
-    <AppContent />
-  </ToastProvider>
+  <HashRouter>
+    <ToastProvider>
+      <AuthProvider>
+          <AppContent />
+      </AuthProvider>
+    </ToastProvider>
+  </HashRouter>
 );
 
 

@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeftIcon, ClipboardCopyIcon, CheckCircleIcon } from './Icons';
@@ -306,6 +307,53 @@ DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'cau_hinh
 -- ALTER TABLE cau_hinh_hoa_hong DROP COLUMN chuc_vu;
 `;
 
+const userProfileSql = `
+-- TẠO BẢNG PROFILES VÀ TRIGGER TỰ ĐỘNG ĐỒNG BỘ USER
+-- Chạy script này để tạo bảng lưu thông tin người dùng công khai.
+
+-- 1. Tạo bảng profiles
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  email TEXT,
+  full_name TEXT,
+  avatar_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (id)
+);
+
+-- 2. Bật bảo mật Row Level Security (RLS)
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+-- 3. Tạo Policies (Quyền truy cập)
+-- Mọi người có thể xem profiles
+CREATE POLICY "Public profiles are viewable by everyone." 
+ON public.profiles FOR SELECT 
+USING (true);
+
+-- Người dùng chỉ có thể sửa profile của chính mình
+CREATE POLICY "Users can update own profile." 
+ON public.profiles FOR UPDATE 
+USING (auth.uid() = id);
+
+-- 4. Tạo Function để xử lý user mới
+CREATE OR REPLACE FUNCTION public.handle_new_user() 
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, full_name)
+  VALUES (new.id, new.email, new.raw_user_meta_data->>'full_name');
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 5. Tạo Trigger (Kích hoạt khi có user mới đăng ký)
+-- Drop trigger cũ nếu tồn tại để tránh lỗi trùng lặp
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+`;
+
   return (
     <div className="container mx-auto max-w-4xl py-8">
       <Link to="/" className="inline-flex items-center text-primary hover:text-blue-700 font-semibold text-sm mb-6">
@@ -405,6 +453,18 @@ DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'cau_hinh
                 Để có thể quản lý động các <span className="font-semibold">Phòng ban</span> và <span className="font-semibold">Chức vụ</span>, bạn cần chạy đoạn mã SQL nâng cấp dưới đây. Nó sẽ chuẩn hóa lại cấu trúc cơ sở dữ liệu của bạn một cách an toàn.
             </p>
             <CodeBlock>{staffModuleUpgradeSql}</CodeBlock>
+        </section>
+
+        {/* Step 6: User Profiles Setup */}
+        <section>
+            <h2 className="text-2xl font-bold text-dark border-b-2 border-purple-600 pb-2 mb-4">Bước 6: Tạo bảng Tài khoản (Profiles) & Trigger</h2>
+            <p className="text-gray-700 mb-2">
+                Supabase lưu thông tin đăng nhập trong bảng hệ thống riêng. Để lưu thông tin bổ sung (tên, avatar) và có thể truy vấn công khai, bạn cần tạo bảng <code className="font-mono bg-gray-200 px-1">public.profiles</code>.
+            </p>
+            <p className="text-gray-700 mb-4">
+                Chạy script dưới đây để tạo bảng này và thiết lập <strong>Trigger</strong> (tự động tạo profile khi có người dùng mới đăng ký).
+            </p>
+            <CodeBlock>{userProfileSql}</CodeBlock>
         </section>
       </div>
     </div>
