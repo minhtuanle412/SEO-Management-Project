@@ -43,10 +43,11 @@ const LoginPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-light flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="flex justify-center">
-            <ChartBarIcon className="h-12 w-12 text-primary" />
+        <div className="flex justify-center mb-4">
+            {/* Sử dụng logo từ URL bên ngoài */}
+            <img src="https://gtvseo.com/wp-content/uploads/2023/10/logo-new-2048x1297.png" alt="GTV SEO Logo" className="h-20 w-auto object-contain" />
         </div>
-        <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+        <h2 className="mt-2 text-center text-3xl font-extrabold text-gray-900">
           SEO Management 2025
         </h2>
         <p className="mt-2 text-center text-sm text-gray-600">

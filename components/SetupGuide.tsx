@@ -354,6 +354,47 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 `;
 
+  const authenticatedRlsSql = `
+-- CẤP QUYỀN TOÀN BỘ CHO USER ĐÃ ĐĂNG NHẬP (AUTHENTICATED)
+-- Script này tự động cấp quyền SELECT, INSERT, UPDATE, DELETE cho nhóm người dùng 'authenticated'
+-- trên tất cả các bảng chính của ứng dụng.
+
+DO $$
+DECLARE
+  -- Danh sách các bảng cần cấp quyền
+  tables text[] := ARRAY[
+    'projects', 
+    'payment_installments', 
+    'monthly_breakdown', 
+    'kpi_entries',
+    'nhan_su', 
+    'phong_ban', 
+    'chuc_vu', 
+    'phan_cong_du_an', 
+    'cau_hinh_hoa_hong'
+  ];
+  t text;
+BEGIN
+  FOREACH t IN ARRAY tables LOOP
+    -- 1. Đảm bảo RLS đã được bật
+    EXECUTE format('ALTER TABLE IF EXISTS %I ENABLE ROW LEVEL SECURITY', t);
+
+    -- 2. Xóa policy cũ nếu tồn tại (để tránh lỗi trùng tên khi chạy lại)
+    BEGIN
+      EXECUTE format('DROP POLICY IF EXISTS "Allow all for authenticated users" ON %I', t);
+    EXCEPTION WHEN OTHERS THEN 
+      -- Bỏ qua nếu chưa có policy
+      NULL; 
+    END;
+
+    -- 3. Tạo policy mới: Cho phép authenticated user làm mọi thứ
+    EXECUTE format('CREATE POLICY "Allow all for authenticated users" ON %I FOR ALL TO authenticated USING (true) WITH CHECK (true)', t);
+    
+    RAISE NOTICE 'Updated policy for table: %', t;
+  END LOOP;
+END $$;
+`;
+
   return (
     <div className="container mx-auto max-w-4xl py-8">
       <Link to="/" className="inline-flex items-center text-primary hover:text-blue-700 font-semibold text-sm mb-6">
@@ -465,6 +506,18 @@ CREATE TRIGGER on_auth_user_created
                 Chạy script dưới đây để tạo bảng này và thiết lập <strong>Trigger</strong> (tự động tạo profile khi có người dùng mới đăng ký).
             </p>
             <CodeBlock>{userProfileSql}</CodeBlock>
+        </section>
+
+        {/* Step 7: Update Data Policies for Authenticated Users */}
+        <section>
+            <h2 className="text-2xl font-bold text-dark border-b-2 border-indigo-600 pb-2 mb-4">Bước 7: Cập nhật Policy dữ liệu cho User đã đăng nhập</h2>
+            <p className="text-gray-700 mb-2">
+                Nếu bạn gặp lỗi <span className="text-red-600 font-mono text-sm bg-red-50 px-1 py-0.5 rounded">new row violates row-level security policy</span> khi thêm hoặc sửa dữ liệu, hãy chạy đoạn mã SQL dưới đây.
+            </p>
+            <p className="text-gray-700 mb-4">
+                Đoạn mã này sẽ cấp quyền đầy đủ (Xem, Thêm, Sửa, Xóa) cho tất cả người dùng đã đăng nhập (Authenticated Users) trên các bảng dữ liệu chính của ứng dụng.
+            </p>
+            <CodeBlock>{authenticatedRlsSql}</CodeBlock>
         </section>
       </div>
     </div>

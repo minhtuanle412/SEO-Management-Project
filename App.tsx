@@ -125,7 +125,8 @@ const Sidebar: React.FC<{ isCollapsed: boolean; toggleSidebar: () => void; }> = 
   return (
     <aside className={`flex-shrink-0 bg-dark p-4 hidden sm:flex flex-col text-white transition-all duration-300 ease-in-out ${isCollapsed ? 'w-20' : 'w-64'}`}>
       <Link to="/" className={`flex items-center space-x-3 px-2 mb-8 ${isCollapsed ? 'justify-center' : ''}`} title="SEO Management 2025 - Dashboard">
-        <ChartBarIcon className="h-8 w-8 text-white flex-shrink-0"/>
+        {/* Updated Logo with external URL */}
+        <img src="https://gtvseo.com/wp-content/uploads/2023/10/logo-new-2048x1297.png" alt="GTV Logo" className="h-10 w-auto object-contain flex-shrink-0"/>
         <span className={`text-xl font-bold text-white whitespace-nowrap ${isCollapsed ? 'hidden' : ''}`}>
           SEO Management
         </span>
