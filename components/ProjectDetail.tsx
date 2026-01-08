@@ -276,7 +276,7 @@ const KpiManagementView: React.FC<{ project: Project; addKpiEntry: (projectId: s
             </div>
 
             <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                <h2 className="text-xl font-bold text-dark mb-4">Thêm KPI tháng mới</h2>
+                <h2 className="text-xl font-bold text-dark">Thêm KPI tháng mới</h2>
                 <form onSubmit={handleAddKpi}>
                     <div className="flex flex-wrap items-end gap-4">
                         <div className="flex-grow" style={{minWidth: '120px'}}>
@@ -1232,13 +1232,13 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projects, allStaff, addKp
     if (!project) return null;
 
     // 1. KPI stats
-    const latestKpiByContractMonth = project.kpiEntries.reduce((acc, entry) => {
+    const latestKpiByContractMonth = project.kpiEntries.reduce<Record<string, KpiEntry>>((acc, entry) => {
         if (!acc[entry.contractMonth] || acc[entry.contractMonth].actualMonth < entry.actualMonth) {
             acc[entry.contractMonth] = entry;
         }
         return acc;
-    }, {} as { [key: string]: KpiEntry });
-    const latestKpiEntries = Object.values(latestKpiByContractMonth);
+    }, {});
+    const latestKpiEntries = Object.values(latestKpiByContractMonth) as KpiEntry[];
     const achievedKpiMonths = latestKpiEntries.filter(entry => entry.kpiPercentage >= 75).length;
     const kpiProgressPercentage = project.durationMonths > 0 ? (achievedKpiMonths / project.durationMonths) * 100 : 0;
     const totalKpiPercentage = latestKpiEntries.reduce((sum, entry) => sum + entry.kpiPercentage, 0);

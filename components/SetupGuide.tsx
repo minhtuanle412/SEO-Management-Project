@@ -29,371 +29,165 @@ const CodeBlock: React.FC<{ children: string }> = ({ children }) => {
 };
 
 const SetupGuide: React.FC = () => {
-  const sqlSchema = `
--- 1. Create Projects table
-CREATE TABLE projects (
+  const masterScript = `
+-- MASTER SCRIPT: CẬP NHẬT TOÀN BỘ DATABASE & QUYỀN (SAFE MODE)
+-- Script này an toàn để chạy nhiều lần. Nó sẽ tạo bảng nếu chưa có, thêm cột thiếu, và sửa lỗi phân quyền.
+
+BEGIN;
+
+-- 1. Bảng Projects & Cột mới
+CREATE TABLE IF NOT EXISTS public.projects (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   client TEXT NOT NULL,
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
   duration_months INT NOT NULL,
-  total_budget NUMERIC NOT NULL CHECK (total_budget > 0),
-  payment_type TEXT NOT NULL DEFAULT 'monthly',
-  looker_studio_url TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS total_budget NUMERIC DEFAULT 0;
+ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS payment_type TEXT DEFAULT 'monthly';
+ALTER TABLE public.projects ADD COLUMN IF NOT EXISTS looker_studio_url TEXT;
 
--- 2. Create Payment Installments table (for milestone payments)
-CREATE TABLE payment_installments (
+-- 2. Bảng Payment Installments
+CREATE TABLE IF NOT EXISTS public.payment_installments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
   name TEXT NOT NULL,
-  payment_percentage INT NOT NULL CHECK (payment_percentage > 0 AND payment_percentage <= 100),
+  payment_percentage INT NOT NULL,
   status TEXT NOT NULL,
   payment_proof_url TEXT
 );
 
--- 3. Create Monthly Breakdown table
-CREATE TABLE monthly_breakdown (
+-- 3. Bảng Monthly Breakdown
+CREATE TABLE IF NOT EXISTS public.monthly_breakdown (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE,
   month INT NOT NULL,
   payment_status TEXT NOT NULL,
-  payment_proof_url TEXT,
-  installment_id UUID REFERENCES payment_installments(id) ON DELETE SET NULL,
   UNIQUE(project_id, month)
 );
+ALTER TABLE public.monthly_breakdown ADD COLUMN IF NOT EXISTS payment_proof_url TEXT;
+ALTER TABLE public.monthly_breakdown ADD COLUMN IF NOT EXISTS installment_id UUID REFERENCES public.payment_installments(id) ON DELETE SET NULL;
 
--- 4. Create KPI Entries table
-CREATE TABLE kpi_entries (
+-- 4. Bảng KPI Entries
+CREATE TABLE IF NOT EXISTS public.kpi_entries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE,
   contract_month INT NOT NULL,
   actual_month DATE NOT NULL,
   kpi_percentage INT NOT NULL,
-  report_status TEXT NOT NULL,
-  report_sent_date DATE,
-  notes TEXT,
-  customer_confirmation_url TEXT,
-  commission_status TEXT NOT NULL DEFAULT 'Không áp dụng',
-  commission_paid_date DATE
+  report_status TEXT NOT NULL
 );
+ALTER TABLE public.kpi_entries ADD COLUMN IF NOT EXISTS report_sent_date DATE;
+ALTER TABLE public.kpi_entries ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE public.kpi_entries ADD COLUMN IF NOT EXISTS customer_confirmation_url TEXT;
+ALTER TABLE public.kpi_entries ADD COLUMN IF NOT EXISTS commission_status TEXT DEFAULT 'Không áp dụng';
+ALTER TABLE public.kpi_entries ADD COLUMN IF NOT EXISTS commission_paid_date DATE;
 
--- 5. Enable Row Level Security (RLS) for all tables
-ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
-ALTER TABLE payment_installments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE monthly_breakdown ENABLE ROW LEVEL SECURITY;
-ALTER TABLE kpi_entries ENABLE ROW LEVEL SECURITY;
+-- 5. Các bảng Cấu hình (Phòng ban, Chức vụ, Nhân sự...)
+CREATE TABLE IF NOT EXISTS public.phong_ban (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT UNIQUE NOT NULL);
+CREATE TABLE IF NOT EXISTS public.chuc_vu (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT UNIQUE NOT NULL);
 
--- 6. Create RLS policies to allow public read/write access
--- WARNING: These are permissive policies for demonstration. 
--- For production, you should implement proper authentication and authorization.
-CREATE POLICY "Enable all access for all users on projects" ON projects FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users on installments" ON payment_installments FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users on monthly_breakdown" ON monthly_breakdown FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users on kpi_entries" ON kpi_entries FOR ALL USING (true) WITH CHECK (true);
-  `;
-
-  const updateSqlSchema = `
--- Lệnh SQL để cập nhật schema CSDL hiện có lên phiên bản mới nhất.
--- Script này được thiết kế để có thể chạy lại nhiều lần mà không gây lỗi.
-
--- Cập nhật bảng 'projects'
-ALTER TABLE public.projects
-ADD COLUMN IF NOT EXISTS total_budget NUMERIC,
-ADD COLUMN IF NOT EXISTS payment_type TEXT,
-ADD COLUMN IF NOT EXISTS looker_studio_url TEXT;
-
--- Điền giá trị mặc định cho các dòng hiện có (chỉ chạy nếu cột là NULL)
-UPDATE public.projects SET total_budget = 1 WHERE total_budget IS NULL;
-UPDATE public.projects SET payment_type = 'monthly' WHERE payment_type IS NULL;
-
--- Thêm ràng buộc NOT NULL sau khi đã điền dữ liệu, chỉ khi cột đang cho phép NULL.
-DO $$
-BEGIN
-  IF (SELECT is_nullable FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'projects' AND column_name = 'total_budget') = 'YES' THEN
-    ALTER TABLE public.projects ALTER COLUMN total_budget SET NOT NULL;
-  END IF;
-  IF (SELECT is_nullable FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'projects' AND column_name = 'payment_type') = 'YES' THEN
-    ALTER TABLE public.projects ALTER COLUMN payment_type SET NOT NULL;
-  END IF;
-END $$;
-
--- Thêm ràng buộc CHECK để đảm bảo total_budget là số dương, chỉ khi nó chưa tồn tại.
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint 
-    WHERE conname = 'total_budget_positive' AND conrelid = 'public.projects'::regclass
-  ) THEN
-    ALTER TABLE public.projects ADD CONSTRAINT total_budget_positive CHECK (total_budget > 0);
-  END IF;
-END $$;
-
-
--- Tạo bảng 'payment_installments' nếu chưa có
-CREATE TABLE IF NOT EXISTS payment_installments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
-  name TEXT NOT NULL,
-  payment_percentage INT NOT NULL CHECK (payment_percentage > 0 AND payment_percentage <= 100),
-  status TEXT NOT NULL,
-  payment_proof_url TEXT
-);
--- Bật RLS và tạo policy nếu bảng vừa được tạo
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'payment_installments' AND policyname = 'Enable all access for all users on installments') THEN
-    ALTER TABLE payment_installments ENABLE ROW LEVEL SECURITY;
-    CREATE POLICY "Enable all access for all users on installments" ON payment_installments FOR ALL USING (true) WITH CHECK (true);
-  END IF;
-END $$;
-
-
--- Cập nhật bảng 'monthly_breakdown'
-ALTER TABLE public.monthly_breakdown
-ADD COLUMN IF NOT EXISTS payment_proof_url TEXT,
-ADD COLUMN IF NOT EXISTS installment_id UUID REFERENCES payment_installments(id) ON DELETE SET NULL;
-
-
--- Cập nhật bảng 'kpi_entries'
-ALTER TABLE public.kpi_entries
-ADD COLUMN IF NOT EXISTS notes TEXT,
-ADD COLUMN IF NOT EXISTS customer_confirmation_url TEXT,
-ADD COLUMN IF NOT EXISTS commission_status TEXT,
-ADD COLUMN IF NOT EXISTS commission_paid_date DATE;
-
--- Điền giá trị mặc định 'Không áp dụng' cho các dòng hiện có chưa có trạng thái.
-UPDATE public.kpi_entries
-SET commission_status = 'Không áp dụng'
-WHERE commission_status IS NULL;
-
--- Cập nhật các dòng đã đạt KPI nhưng chưa có trạng thái đúng thành 'Chưa chi trả'.
-UPDATE public.kpi_entries
-SET commission_status = 'Chưa chi trả'
-WHERE kpi_percentage >= 75 AND commission_status = 'Không áp dụng';
-
--- Thêm ràng buộc NOT NULL cho commission_status sau khi đã điền dữ liệu.
-DO $$
-BEGIN
-  IF (SELECT is_nullable FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'kpi_entries' AND column_name = 'commission_status') = 'YES' THEN
-    ALTER TABLE public.kpi_entries ALTER COLUMN commission_status SET NOT NULL;
-  END IF;
-END $$;
-`;
-
-  const storagePoliciesSql = `
--- Policy to allow anonymous users to view files in the 'payment_proofs' bucket.
-CREATE POLICY "Public Read Access for Payment Proofs"
-ON storage.objects FOR SELECT
-USING ( bucket_id = 'payment_proofs' );
-
--- Policy to allow anonymous users to upload files to the 'payment_proofs' bucket.
-CREATE POLICY "Allow anonymous uploads for Payment Proofs"
-ON storage.objects FOR INSERT
-WITH CHECK ( bucket_id = 'payment_proofs' );
-  `;
-    
-  const confirmationStoragePoliciesSql = `
--- Policy to allow anonymous users to view files in the 'confirmation_proofs' bucket.
-CREATE POLICY "Public Read Access for Confirmations"
-ON storage.objects FOR SELECT
-USING ( bucket_id = 'confirmation_proofs' );
-
--- Policy to allow anonymous users to upload files to the 'confirmation_proofs' bucket.
-CREATE POLICY "Allow anonymous uploads for Confirmations"
-ON storage.objects FOR INSERT
-WITH CHECK ( bucket_id = 'confirmation_proofs' );
-  `;
-  
-  const commissionModuleSql = `
--- 1. Create Staff table (nhan_su)
-CREATE TABLE nhan_su (
+CREATE TABLE IF NOT EXISTS public.nhan_su (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   ho_ten TEXT NOT NULL,
-  chuc_vu TEXT NOT NULL,
-  phong_ban TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+ALTER TABLE public.nhan_su ADD COLUMN IF NOT EXISTS phong_ban_id UUID REFERENCES public.phong_ban(id) ON DELETE SET NULL;
+ALTER TABLE public.nhan_su ADD COLUMN IF NOT EXISTS chuc_vu_id UUID REFERENCES public.chuc_vu(id) ON DELETE SET NULL;
 
--- 2. Create Project Assignment table (phan_cong_du_an)
-CREATE TABLE phan_cong_du_an (
+CREATE TABLE IF NOT EXISTS public.phan_cong_du_an (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
-  nhan_su_id UUID REFERENCES nhan_su(id) ON DELETE CASCADE NOT NULL,
+  project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
+  nhan_su_id UUID REFERENCES public.nhan_su(id) ON DELETE CASCADE NOT NULL,
   UNIQUE(project_id, nhan_su_id)
 );
 
--- 3. Create Commission Configuration table (cau_hinh_hoa_hong)
-CREATE TABLE cau_hinh_hoa_hong (
+CREATE TABLE IF NOT EXISTS public.cau_hinh_hoa_hong (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  chuc_vu TEXT UNIQUE NOT NULL,
   ty_le_hoa_hong NUMERIC NOT NULL CHECK (ty_le_hoa_hong >= 0)
 );
+ALTER TABLE public.cau_hinh_hoa_hong ADD COLUMN IF NOT EXISTS chuc_vu_id UUID REFERENCES public.chuc_vu(id) ON DELETE CASCADE UNIQUE;
 
--- 4. Enable RLS for new tables
-ALTER TABLE nhan_su ENABLE ROW LEVEL SECURITY;
-ALTER TABLE phan_cong_du_an ENABLE ROW LEVEL SECURITY;
-ALTER TABLE cau_hinh_hoa_hong ENABLE ROW LEVEL SECURITY;
-
--- 5. Create RLS policies for new tables
-CREATE POLICY "Enable all access for all users on nhan_su" ON nhan_su FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users on phan_cong_du_an" ON phan_cong_du_an FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Enable all access for all users on cau_hinh_hoa_hong" ON cau_hinh_hoa_hong FOR ALL USING (true) WITH CHECK (true);
-
--- 6. Insert default commission configurations (optional, but recommended)
-INSERT INTO cau_hinh_hoa_hong (chuc_vu, ty_le_hoa_hong)
-VALUES
-  ('Sale Admin', 0),
-  ('Sale', 0),
-  ('Leader', 0),
-  ('Nhân sự triển khai', 0)
-ON CONFLICT (chuc_vu) DO NOTHING;
-`;
-
-const staffModuleUpgradeSql = `
--- NÂNG CẤP MODULE NHÂN SỰ & HOA HỒNG
--- Script này sẽ chuẩn hóa dữ liệu Phòng ban và Chức vụ vào các bảng riêng,
--- giúp việc quản lý trở nên dễ dàng và nhất quán hơn.
--- Script được thiết kế để có thể chạy lại nhiều lần một cách an toàn.
-
--- Bước 1: Tạo bảng 'phong_ban' và 'chuc_vu' nếu chưa tồn tại.
-CREATE TABLE IF NOT EXISTS phong_ban (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT UNIQUE NOT NULL
-);
-CREATE TABLE IF NOT EXISTS chuc_vu (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT UNIQUE NOT NULL
-);
-
--- Bước 2: Bật RLS và tạo Policies nếu chưa có.
-DO $$ BEGIN ALTER TABLE phong_ban ENABLE ROW LEVEL SECURITY; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'Enable all access for all users on phong_ban' AND polrelid = 'phong_ban'::regclass) THEN CREATE POLICY "Enable all access for all users on phong_ban" ON phong_ban FOR ALL USING (true) WITH CHECK (true); END IF; END $$;
-DO $$ BEGIN ALTER TABLE chuc_vu ENABLE ROW LEVEL SECURITY; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'Enable all access for all users on chuc_vu' AND polrelid = 'chuc_vu'::regclass) THEN CREATE POLICY "Enable all access for all users on chuc_vu" ON chuc_vu FOR ALL USING (true) WITH CHECK (true); END IF; END $$;
-
--- Bước 3: Di chuyển dữ liệu từ các cột text cũ vào bảng mới.
--- Chèn các giá trị duy nhất từ 'nhan_su' và 'cau_hinh_hoa_hong' vào các bảng mới.
-INSERT INTO phong_ban (name) SELECT DISTINCT phong_ban FROM nhan_su WHERE phong_ban IS NOT NULL ON CONFLICT (name) DO NOTHING;
-INSERT INTO chuc_vu (name) SELECT DISTINCT chuc_vu FROM nhan_su WHERE chuc_vu IS NOT NULL ON CONFLICT (name) DO NOTHING;
-INSERT INTO chuc_vu (name) SELECT DISTINCT chuc_vu FROM cau_hinh_hoa_hong WHERE chuc_vu IS NOT NULL ON CONFLICT (name) DO NOTHING;
-
--- Bước 4: Cập nhật bảng 'nhan_su' để sử dụng foreign keys.
--- Thêm các cột foreign key mới nếu chưa có.
-ALTER TABLE nhan_su ADD COLUMN IF NOT EXISTS phong_ban_id UUID REFERENCES phong_ban(id) ON DELETE SET NULL;
-ALTER TABLE nhan_su ADD COLUMN IF NOT EXISTS chuc_vu_id UUID REFERENCES chuc_vu(id) ON DELETE SET NULL;
-
--- Cập nhật các foreign key dựa trên giá trị text cũ (chỉ chạy cho các dòng chưa được cập nhật).
-UPDATE nhan_su SET phong_ban_id = (SELECT id FROM phong_ban WHERE phong_ban.name = nhan_su.phong_ban) WHERE phong_ban_id IS NULL AND phong_ban IS NOT NULL;
-UPDATE nhan_su SET chuc_vu_id = (SELECT id FROM chuc_vu WHERE chuc_vu.name = nhan_su.chuc_vu) WHERE chuc_vu_id IS NULL AND chuc_vu IS NOT NULL;
-
--- Bước 5: Cập nhật bảng 'cau_hinh_hoa_hong' để sử dụng foreign keys.
--- Thêm cột foreign key mới nếu chưa có.
-ALTER TABLE cau_hinh_hoa_hong ADD COLUMN IF NOT EXISTS chuc_vu_id UUID REFERENCES chuc_vu(id) ON DELETE CASCADE;
-
--- Cập nhật foreign key.
-UPDATE cau_hinh_hoa_hong SET chuc_vu_id = (SELECT id FROM chuc_vu WHERE chuc_vu.name = cau_hinh_hoa_hong.chuc_vu) WHERE chuc_vu_id IS NULL AND chuc_vu IS NOT NULL;
-
--- Thêm ràng buộc UNIQUE cho cột mới nếu chưa có.
-DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'cau_hinh_hoa_hong_chuc_vu_id_key' AND conrelid = 'cau_hinh_hoa_hong'::regclass) THEN ALTER TABLE cau_hinh_hoa_hong ADD CONSTRAINT cau_hinh_hoa_hong_chuc_vu_id_key UNIQUE (chuc_vu_id); END IF; END $$;
-
--- Ghi chú: Các cột text cũ ('phong_ban', 'chuc_vu') trong bảng 'nhan_su' và 'cau_hinh_hoa_hong'
--- được giữ lại để đảm bảo an toàn. Sau khi xác nhận mọi thứ hoạt động chính xác,
--- bạn có thể xóa chúng thủ công bằng các lệnh sau:
--- ALTER TABLE nhan_su DROP COLUMN phong_ban;
--- ALTER TABLE nhan_su DROP COLUMN chuc_vu;
--- ALTER TABLE cau_hinh_hoa_hong DROP COLUMN chuc_vu;
-`;
-
-const userProfileSql = `
--- TẠO BẢNG PROFILES VÀ TRIGGER TỰ ĐỘNG ĐỒNG BỘ USER
--- Chạy script này để tạo bảng lưu thông tin người dùng công khai.
-
--- 1. Tạo bảng profiles
+-- 6. Bảng Profiles & ROLE (Khắc phục lỗi thiếu cột Role)
 CREATE TABLE IF NOT EXISTS public.profiles (
-  id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT,
   full_name TEXT,
   avatar_url TEXT,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  PRIMARY KEY (id)
+  created_at TIMESTAMPTZ DEFAULT now()
 );
+-- QUAN TRỌNG: Lệnh này đảm bảo cột role luôn tồn tại
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'staff';
 
--- 2. Bật bảo mật Row Level Security (RLS)
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-
--- 3. Tạo Policies (Quyền truy cập)
--- Mọi người có thể xem profiles
-CREATE POLICY "Public profiles are viewable by everyone." 
-ON public.profiles FOR SELECT 
-USING (true);
-
--- Người dùng chỉ có thể sửa profile của chính mình
-CREATE POLICY "Users can update own profile." 
-ON public.profiles FOR UPDATE 
-USING (auth.uid() = id);
-
--- 4. Tạo Function để xử lý user mới
+-- 7. Trigger tạo user
 CREATE OR REPLACE FUNCTION public.handle_new_user() 
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id, email, full_name)
-  VALUES (new.id, new.email, new.raw_user_meta_data->>'full_name');
+  INSERT INTO public.profiles (id, email, full_name, role)
+  VALUES (new.id, new.email, new.raw_user_meta_data->>'full_name', 'staff')
+  ON CONFLICT (id) DO NOTHING;
   RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 5. Tạo Trigger (Kích hoạt khi có user mới đăng ký)
--- Drop trigger cũ nếu tồn tại để tránh lỗi trùng lặp
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
-CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
-`;
+-- Đồng bộ user cũ nếu có
+INSERT INTO public.profiles (id, email) SELECT id, email FROM auth.users ON CONFLICT (id) DO NOTHING;
 
-  const authenticatedRlsSql = `
--- CẤP QUYỀN TOÀN BỘ CHO USER ĐÃ ĐĂNG NHẬP (AUTHENTICATED)
--- Script này tự động cấp quyền SELECT, INSERT, UPDATE, DELETE cho nhóm người dùng 'authenticated'
--- trên tất cả các bảng chính của ứng dụng.
-
+-- 8. Phân quyền (RLS Policies)
+-- Reset toàn bộ policies cũ để tránh xung đột
 DO $$
 DECLARE
-  -- Danh sách các bảng cần cấp quyền
-  tables text[] := ARRAY[
-    'projects', 
-    'payment_installments', 
-    'monthly_breakdown', 
-    'kpi_entries',
-    'nhan_su', 
-    'phong_ban', 
-    'chuc_vu', 
-    'phan_cong_du_an', 
-    'cau_hinh_hoa_hong'
-  ];
+  tabs text[] := ARRAY['projects', 'payment_installments', 'monthly_breakdown', 'kpi_entries', 'nhan_su', 'phong_ban', 'chuc_vu', 'phan_cong_du_an', 'cau_hinh_hoa_hong', 'profiles'];
   t text;
 BEGIN
-  FOREACH t IN ARRAY tables LOOP
-    -- 1. Đảm bảo RLS đã được bật
+  FOREACH t IN ARRAY tabs LOOP
     EXECUTE format('ALTER TABLE IF EXISTS %I ENABLE ROW LEVEL SECURITY', t);
-
-    -- 2. Xóa policy cũ nếu tồn tại (để tránh lỗi trùng tên khi chạy lại)
-    BEGIN
-      EXECUTE format('DROP POLICY IF EXISTS "Allow all for authenticated users" ON %I', t);
-    EXCEPTION WHEN OTHERS THEN 
-      -- Bỏ qua nếu chưa có policy
-      NULL; 
-    END;
-
-    -- 3. Tạo policy mới: Cho phép authenticated user làm mọi thứ
-    EXECUTE format('CREATE POLICY "Allow all for authenticated users" ON %I FOR ALL TO authenticated USING (true) WITH CHECK (true)', t);
-    
-    RAISE NOTICE 'Updated policy for table: %', t;
+    EXECUTE format('DROP POLICY IF EXISTS "Public access" ON %I', t);
+    EXECUTE format('DROP POLICY IF EXISTS "Authenticated access" ON %I', t);
+    EXECUTE format('DROP POLICY IF EXISTS "Admin access" ON %I', t);
+    EXECUTE format('DROP POLICY IF EXISTS "Read access" ON %I', t);
+    EXECUTE format('DROP POLICY IF EXISTS "Enable all access for all users on %I" ON %I', t, t);
+    EXECUTE format('DROP POLICY IF EXISTS "Allow all for authenticated users" ON %I', t);
+    EXECUTE format('DROP POLICY IF EXISTS "Admin update roles" ON %I', t);
+    EXECUTE format('DROP POLICY IF EXISTS "Enable write access for admins on %I" ON %I', t, t);
   END LOOP;
 END $$;
-`;
+
+-- Policy cho Profiles
+CREATE POLICY "Public read profiles" ON public.profiles FOR SELECT USING (true);
+CREATE POLICY "User update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+-- Chỉ Admin sửa role
+CREATE POLICY "Admin update role" ON public.profiles FOR UPDATE USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
+);
+
+-- Policy cho Cấu hình (Ai cũng xem, Chỉ Admin sửa)
+CREATE POLICY "Read config" ON public.nhan_su FOR SELECT USING (true);
+CREATE POLICY "Admin write config" ON public.nhan_su FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
+
+CREATE POLICY "Read config" ON public.phong_ban FOR SELECT USING (true);
+CREATE POLICY "Admin write config" ON public.phong_ban FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
+
+CREATE POLICY "Read config" ON public.chuc_vu FOR SELECT USING (true);
+CREATE POLICY "Admin write config" ON public.chuc_vu FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
+
+CREATE POLICY "Read config" ON public.cau_hinh_hoa_hong FOR SELECT USING (true);
+CREATE POLICY "Admin write config" ON public.cau_hinh_hoa_hong FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
+
+-- Policy cho Dữ liệu Dự án (Authenticated users được sửa để vận hành)
+CREATE POLICY "Auth access projects" ON public.projects FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Auth access installments" ON public.payment_installments FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Auth access breakdown" ON public.monthly_breakdown FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Auth access kpi" ON public.kpi_entries FOR ALL TO authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Auth access assignments" ON public.phan_cong_du_an FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+COMMIT;
+  `;
 
   return (
     <div className="container mx-auto max-w-4xl py-8">
@@ -403,122 +197,45 @@ END $$;
       </Link>
       <h1 className="text-4xl font-bold text-dark mb-4">Hướng dẫn Cài đặt Supabase</h1>
       <p className="text-gray-600 mb-8">
-        Để ứng dụng hoạt động đầy đủ, bạn cần cài đặt cơ sở dữ liệu và lưu trữ trên Supabase. Dưới đây là các bước cần thiết.
+        Trang này cung cấp các mã lệnh SQL cần thiết để thiết lập cơ sở dữ liệu cho ứng dụng.
       </p>
 
       <div className="space-y-12">
         
-        {/* Step 1: Database Setup */}
-        <section>
-          <h2 className="text-2xl font-bold text-dark border-b-2 border-primary pb-2 mb-4">Bước 1: Cài đặt Cơ sở dữ liệu (Cho Cài đặt Mới)</h2>
-          <p className="text-gray-700 mb-2">
-            Nếu bạn đang cài đặt ứng dụng lần đầu, hãy vào Supabase Dashboard của bạn, điều hướng đến <span className="font-semibold">SQL Editor</span>, và chạy đoạn mã SQL dưới đây để tạo các bảng cần thiết và thiết lập chính sách bảo mật (Row Level Security).
+        {/* MASTER SCRIPT SECTION */}
+        <section className="bg-blue-50 border border-blue-200 rounded-xl p-6">
+          <div className="flex items-center mb-4">
+             <CheckCircleIcon className="h-8 w-8 text-blue-600 mr-3" />
+             <h2 className="text-2xl font-bold text-blue-900">Script Tổng hợp (Khuyên dùng)</h2>
+          </div>
+          <p className="text-blue-800 mb-4">
+            Nếu bạn gặp bất kỳ lỗi nào (ví dụ: thiếu cột 'role', lỗi permission denied), hãy chạy đoạn mã dưới đây. 
+            Nó sẽ tự động kiểm tra và sửa chữa toàn bộ cấu trúc database và phân quyền mà <strong>không làm mất dữ liệu hiện có</strong>.
           </p>
-          <CodeBlock>{sqlSchema}</CodeBlock>
-        </section>
-
-        {/* Update Existing Database Section */}
-        <section>
-          <h2 className="text-2xl font-bold text-dark border-b-2 border-primary pb-2 mb-4">Cập nhật Schema Cơ sở dữ liệu (Cho Cài đặt Hiện có)</h2>
-          <p className="text-gray-700 mb-2">
-            Nếu bạn đã cài đặt một phiên bản cũ hơn và cần nâng cấp, hãy chạy đoạn mã SQL dưới đây. Nó sẽ cập nhật các bảng của bạn lên cấu trúc mới nhất mà <span className="font-semibold">không làm mất dữ liệu hiện có</span>. Script này được thiết kế để có thể chạy lại nhiều lần mà không gây lỗi.
-          </p>
-          <CodeBlock>{updateSqlSchema}</CodeBlock>
-        </section>
-        
-        {/* Step 2: Storage Bucket Setup */}
-        <section>
-          <h2 className="text-2xl font-bold text-dark border-b-2 border-primary pb-2 mb-4">Bước 2: Tạo Storage Buckets</h2>
-          <p className="text-gray-700 mb-4">
-            Ứng dụng cần nơi để lưu trữ các tệp tải lên. Bạn cần tạo hai "Bucket" trong Supabase Storage.
-          </p>
-          <div className="space-y-6">
-            <div>
-                <h3 className="text-lg font-semibold text-gray-800">2.1. Bucket cho Chứng từ Thanh toán</h3>
-                <ol className="list-decimal list-inside space-y-3 text-gray-700 bg-gray-50 p-6 rounded-lg border mt-2">
-                    <li>Trong Supabase Dashboard, điều hướng đến mục <span className="font-semibold">Storage</span>.</li>
-                    <li>Nhấn vào nút <span className="font-semibold">"New Bucket"</span>.</li>
-                    <li>
-                    Nhập tên bucket chính xác là:
-                    <div className="my-2 bg-yellow-100 border border-yellow-300 text-yellow-800 font-mono font-bold text-center py-2 rounded-md">
-                        payment_proofs
-                    </div>
-                    </li>
-                    <li>Đánh dấu vào ô <span className="font-semibold">"Public bucket"</span>.</li>
-                    <li>Nhấn <span className="font-semibold">"Create Bucket"</span>.</li>
-                </ol>
-            </div>
-            <div>
-                <h3 className="text-lg font-semibold text-gray-800">2.2. Bucket cho Xác nhận của Khách hàng</h3>
-                <ol className="list-decimal list-inside space-y-3 text-gray-700 bg-gray-50 p-6 rounded-lg border mt-2">
-                    <li>Vẫn trong mục <span className="font-semibold">Storage</span>, nhấn <span className="font-semibold">"New Bucket"</span> một lần nữa.</li>
-                    <li>
-                    Nhập tên bucket chính xác là:
-                    <div className="my-2 bg-yellow-100 border border-yellow-300 text-yellow-800 font-mono font-bold text-center py-2 rounded-md">
-                        confirmation_proofs
-                    </div>
-                    </li>
-                    <li>Đánh dấu vào ô <span className="font-semibold">"Public bucket"</span>.</li>
-                    <li>Nhấn <span className="font-semibold">"Create Bucket"</span>.</li>
-                </ol>
-            </div>
+          <CodeBlock>{masterScript}</CodeBlock>
+          
+          <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+             <h4 className="font-bold text-yellow-800">Sau khi chạy xong:</h4>
+             <p className="text-yellow-700 text-sm mt-1">
+                Đừng quên chạy lệnh sau để cấp quyền Admin cho chính bạn (thay email của bạn vào):<br/>
+                <code className="bg-yellow-100 px-2 py-1 rounded font-mono text-black select-all">UPDATE public.profiles SET role = 'admin' WHERE email = 'YOUR_EMAIL@GMAIL.COM';</code>
+             </p>
           </div>
         </section>
 
-        {/* Step 3: Storage Policies */}
+        {/* Storage Bucket Setup */}
         <section>
-          <h2 className="text-2xl font-bold text-dark border-b-2 border-primary pb-2 mb-4">Bước 3 (Tùy chọn): Chính sách Bảo mật cho Storage</h2>
-           <p className="text-gray-700 mb-2">
-            Nếu bạn không đặt các bucket là "Public" ở Bước 2, bạn cần tạo các chính sách bảo mật cho Storage.
-            Trong <span className="font-semibold">SQL Editor</span>, chạy các lệnh SQL dưới đây để cho phép ứng dụng đọc và ghi tệp vào các bucket.
+          <h2 className="text-2xl font-bold text-dark border-b-2 border-gray-200 pb-2 mb-4">Thiết lập Storage (Lưu trữ ảnh)</h2>
+          <p className="text-gray-700 mb-4">
+            Bạn cần tạo 2 bucket công khai (Public) trong menu <strong>Storage</strong> của Supabase:
           </p>
-          <h3 className="text-lg font-semibold text-gray-800 mt-4">Chính sách cho 'payment_proofs'</h3>
-           <CodeBlock>{storagePoliciesSql}</CodeBlock>
-           <h3 className="text-lg font-semibold text-gray-800 mt-4">Chính sách cho 'confirmation_proofs'</h3>
-           <CodeBlock>{confirmationStoragePoliciesSql}</CodeBlock>
+          <ul className="list-disc list-inside space-y-2 text-gray-700 bg-gray-50 p-6 rounded-lg border">
+             <li>Bucket 1: <strong>payment_proofs</strong> (Dùng lưu ảnh chuyển khoản)</li>
+             <li>Bucket 2: <strong>confirmation_proofs</strong> (Dùng lưu ảnh xác nhận KH)</li>
+          </ul>
+          <p className="text-gray-500 text-sm mt-2">Lưu ý: Nhớ tick chọn "Public Bucket" khi tạo.</p>
         </section>
 
-        {/* Step 4: Commission Module Setup */}
-        <section>
-            <h2 className="text-2xl font-bold text-dark border-b-2 border-accent pb-2 mb-4">Bước 4: Cài đặt Module Hoa hồng (Cho Cài đặt Mới)</h2>
-            <p className="text-gray-700 mb-2">
-                Nếu bạn đang cài đặt lần đầu, đoạn mã ở Bước 1 đã bao gồm các bảng này. Nếu bạn đang nâng cấp, hãy sử dụng script ở Bước 5. Đoạn mã dưới đây chỉ để tham khảo.
-            </p>
-            <CodeBlock>{commissionModuleSql}</CodeBlock>
-        </section>
-
-        {/* Step 5: Staff Module Upgrade */}
-        <section>
-            <h2 className="text-2xl font-bold text-dark border-b-2 border-green-600 pb-2 mb-4">Bước 5: Nâng cấp Module Nhân sự & Hoa hồng</h2>
-            <p className="text-gray-700 mb-2">
-                Để có thể quản lý động các <span className="font-semibold">Phòng ban</span> và <span className="font-semibold">Chức vụ</span>, bạn cần chạy đoạn mã SQL nâng cấp dưới đây. Nó sẽ chuẩn hóa lại cấu trúc cơ sở dữ liệu của bạn một cách an toàn.
-            </p>
-            <CodeBlock>{staffModuleUpgradeSql}</CodeBlock>
-        </section>
-
-        {/* Step 6: User Profiles Setup */}
-        <section>
-            <h2 className="text-2xl font-bold text-dark border-b-2 border-purple-600 pb-2 mb-4">Bước 6: Tạo bảng Tài khoản (Profiles) & Trigger</h2>
-            <p className="text-gray-700 mb-2">
-                Supabase lưu thông tin đăng nhập trong bảng hệ thống riêng. Để lưu thông tin bổ sung (tên, avatar) và có thể truy vấn công khai, bạn cần tạo bảng <code className="font-mono bg-gray-200 px-1">public.profiles</code>.
-            </p>
-            <p className="text-gray-700 mb-4">
-                Chạy script dưới đây để tạo bảng này và thiết lập <strong>Trigger</strong> (tự động tạo profile khi có người dùng mới đăng ký).
-            </p>
-            <CodeBlock>{userProfileSql}</CodeBlock>
-        </section>
-
-        {/* Step 7: Update Data Policies for Authenticated Users */}
-        <section>
-            <h2 className="text-2xl font-bold text-dark border-b-2 border-indigo-600 pb-2 mb-4">Bước 7: Cập nhật Policy dữ liệu cho User đã đăng nhập</h2>
-            <p className="text-gray-700 mb-2">
-                Nếu bạn gặp lỗi <span className="text-red-600 font-mono text-sm bg-red-50 px-1 py-0.5 rounded">new row violates row-level security policy</span> khi thêm hoặc sửa dữ liệu, hãy chạy đoạn mã SQL dưới đây.
-            </p>
-            <p className="text-gray-700 mb-4">
-                Đoạn mã này sẽ cấp quyền đầy đủ (Xem, Thêm, Sửa, Xóa) cho tất cả người dùng đã đăng nhập (Authenticated Users) trên các bảng dữ liệu chính của ứng dụng.
-            </p>
-            <CodeBlock>{authenticatedRlsSql}</CodeBlock>
-        </section>
       </div>
     </div>
   );

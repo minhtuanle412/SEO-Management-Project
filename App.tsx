@@ -9,9 +9,10 @@ import ManagementPage from './components/ManagementPage';
 import CommissionReportPage from './components/CommissionReportPage';
 import CommissionPayrollPage from './components/CommissionPayrollPage';
 import LoginPage from './components/LoginPage';
+import UserManagementPage from './components/UserManagementPage';
 import { addMonths, format } from 'date-fns';
 import { supabase, areCredentialsPlaceholders } from './lib/supabaseClient';
-import { XCircleIcon, ChartBarIcon, QuestionMarkCircleIcon, UsersIcon, PresentationChartLineIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, CurrencyDollarIcon } from './components/Icons';
+import { XCircleIcon, ChartBarIcon, QuestionMarkCircleIcon, UsersIcon, PresentationChartLineIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, CurrencyDollarIcon, ShieldCheckIcon } from './components/Icons';
 import { ToastProvider, useToast } from './contexts/ToastContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
@@ -120,7 +121,7 @@ const NavLink: React.FC<{ to: string; icon: React.ReactNode; label: string; isCo
 
 // --- Sidebar Component (for Desktop) ---
 const Sidebar: React.FC<{ isCollapsed: boolean; toggleSidebar: () => void; }> = ({ isCollapsed, toggleSidebar }) => {
-  const { user, signOut } = useAuth();
+  const { user, signOut, isAdmin, profile } = useAuth();
 
   return (
     <aside className={`flex-shrink-0 bg-dark p-4 hidden sm:flex flex-col text-white transition-all duration-300 ease-in-out ${isCollapsed ? 'w-20' : 'w-64'}`}>
@@ -128,6 +129,7 @@ const Sidebar: React.FC<{ isCollapsed: boolean; toggleSidebar: () => void; }> = 
         {/* Updated Logo with external URL */}
         <img src="https://gtvseo.com/wp-content/uploads/2023/10/logo-new-2048x1297.png" alt="GTV Logo" className="h-10 w-auto object-contain flex-shrink-0"/>
         <span className={`text-xl font-bold text-white whitespace-nowrap ${isCollapsed ? 'hidden' : ''}`}>
+          SEO Management
         </span>
       </Link>
       
@@ -135,18 +137,34 @@ const Sidebar: React.FC<{ isCollapsed: boolean; toggleSidebar: () => void; }> = 
         <NavLink to="/" icon={<ChartBarIcon className="h-6 w-6 flex-shrink-0" />} label="Danh sách dự án" isCollapsed={isCollapsed} />
         <NavLink to="/commission-report" icon={<PresentationChartLineIcon className="h-6 w-6 flex-shrink-0" />} label="Hoa hồng theo dự án" isCollapsed={isCollapsed} />
         <NavLink to="/commission-payroll" icon={<CurrencyDollarIcon className="h-6 w-6 flex-shrink-0" />} label="Hoa hồng theo cá nhân" isCollapsed={isCollapsed} />
-        <NavLink to="/management" icon={<UsersIcon className="h-6 w-6 flex-shrink-0" />} label="Quản lý" isCollapsed={isCollapsed} />
+        
+        {/* Only show Management link for Admins */}
+        {isAdmin && (
+            <div className={`mt-6 pt-6 border-t border-gray-700 ${isCollapsed ? 'hidden' : ''}`}>
+                 <p className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Admin</p>
+            </div>
+        )}
+        
+        {isAdmin && (
+            <>
+                 <NavLink to="/management" icon={<UsersIcon className="h-6 w-6 flex-shrink-0" />} label="Quản lý Cấu hình" isCollapsed={isCollapsed} />
+                 <NavLink to="/admin/users" icon={<ShieldCheckIcon className="h-6 w-6 flex-shrink-0" />} label="Tài khoản hệ thống" isCollapsed={isCollapsed} />
+            </>
+        )}
       </nav>
       
       <div className="w-full mt-auto">
         {!isCollapsed && user && (
             <div className="mb-4 px-2 text-xs text-gray-400 truncate">
-                Đăng nhập: <br/>
-                <span className="text-white" title={user.email}>{user.email}</span>
+                <div>Đăng nhập:</div>
+                <div className="text-white font-medium" title={user.email}>{user.email}</div>
+                {profile?.role && <div className="mt-1 inline-block px-2 py-0.5 rounded bg-gray-700 text-xs text-gray-300 capitalize">{profile.role}</div>}
             </div>
         )}
         
-        <NavLink to="/setup" icon={<QuestionMarkCircleIcon className="h-6 w-6 flex-shrink-0" />} label="Hướng dẫn cài đặt" isCollapsed={isCollapsed} />
+        {isAdmin && (
+             <NavLink to="/setup" icon={<QuestionMarkCircleIcon className="h-6 w-6 flex-shrink-0" />} label="Cài đặt Database" isCollapsed={isCollapsed} />
+        )}
         
         <button
             onClick={signOut}
@@ -192,13 +210,15 @@ const BottomNavLink: React.FC<{ to: string; icon: React.ReactNode; label: string
 
 // --- Bottom Navigation Bar Component (for Mobile) ---
 const BottomNavBar: React.FC = () => {
-    const { signOut } = useAuth();
+    const { signOut, isAdmin } = useAuth();
   return (
     <nav className="fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-gray-200 flex sm:hidden z-40 shadow-[0_-2px_5px_rgba(0,0,0,0.05)]">
       <BottomNavLink to="/" icon={<ChartBarIcon className="h-6 w-6" />} label="Dự án" />
       <BottomNavLink to="/commission-report" icon={<PresentationChartLineIcon className="h-6 w-6" />} label="HH Dự án" />
       <BottomNavLink to="/commission-payroll" icon={<CurrencyDollarIcon className="h-6 w-6" />} label="HH Cá nhân" />
-      <BottomNavLink to="/management" icon={<UsersIcon className="h-6 w-6" />} label="Quản lý" />
+      {isAdmin && (
+         <BottomNavLink to="/management" icon={<UsersIcon className="h-6 w-6" />} label="Quản lý" />
+      )}
       <button
         onClick={signOut}
         className="flex flex-col items-center justify-center flex-1 py-2 text-xs text-gray-500 hover:text-red-500"
@@ -224,7 +244,7 @@ const AppContent: React.FC = () => {
   const [isSupabaseConfigured] = useState(!areCredentialsPlaceholders());
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const { addToast } = useToast();
-  const { user, loading: authLoading } = useAuth(); // Auth Hook
+  const { user, loading: authLoading, isAdmin } = useAuth(); // Auth Hook
   
   const toggleSidebar = useCallback(() => {
     setIsSidebarCollapsed(prev => !prev);
@@ -266,15 +286,17 @@ const AppContent: React.FC = () => {
              if (errorMessage.includes("does not exist")) {
                  setError(`Lỗi cơ sở dữ liệu: Một hoặc nhiều bảng (projects, nhan_su, etc.) không tồn tại. Vui lòng chạy các câu lệnh SQL trong Hướng dẫn Cài đặt.`);
              } else if (errorMessage.includes("violates row-level security policy")) {
-                 setError(`Lỗi bảo mật: Quyền truy cập bị từ chối. Vui lòng kiểm tra chính sách RLS trên các bảng và đảm bảo chúng cho phép quyền đọc (SELECT).`);
+                 // Don't show full error screen for RLS, just maybe partial data or empty arrays for some
+                 console.warn("RLS policy restricted some data");
              } else {
                  setError(`Không thể tải dữ liệu: ${errorMessage}`);
              }
-             setProjects([]);
-             setStaff([]);
-             setCommissionConfigs([]);
-             setDepartments([]);
-             setPositions([]);
+             // Even if error, set what we have
+             setProjects(projectsRes.data?.map(mapSupabaseProject) || []);
+             setStaff(staffRes.data as Staff[] || []);
+             setCommissionConfigs(commissionConfigsRes.data as CommissionConfig[] || []);
+             setDepartments(departmentsRes.data || []);
+             setPositions(positionsRes.data || []);
         } else {
             setProjects(projectsRes.data?.map(mapSupabaseProject) || []);
             setStaff(staffRes.data as Staff[] || []);
@@ -327,7 +349,7 @@ const AppContent: React.FC = () => {
             let userFriendlyMessage = `Lỗi khi thêm dự án: ${errorMessageStr}${errorDetailsStr}`;
             
             if (errorMessageStr.toLowerCase().includes('security policy')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Không thể thêm dự án. Vui lòng kiểm tra chính sách RLS trên bảng "projects" và đảm bảo quyền INSERT được bật. Tham khảo trang Hướng dẫn Cài đặt.`;
+                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền thêm dự án.`;
             } else if (errorMessageStr.includes("violates check constraint") && errorMessageStr.includes("total_budget_positive")) {
                  userFriendlyMessage = `Lỗi dữ liệu: Tổng ngân sách phải là một số dương.`;
             }
@@ -382,7 +404,7 @@ const addKpiEntry = useCallback(async (projectId: string, newEntryData: Omit<Kpi
             let userFriendlyMessage = `Lỗi khi thêm mục KPI: ${errorMessageStr}${errorDetailsStr}`;
 
             if (errorMessageStr.toLowerCase().includes('security policy')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Không thể thêm KPI. Vui lòng kiểm tra chính sách RLS trên bảng "kpi_entries" và đảm bảo quyền INSERT được bật. Tham khảo trang Hướng dẫn Cài đặt.`;
+                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền thêm KPI.`;
             }
             addToast(userFriendlyMessage, 'error');
             return;
@@ -416,7 +438,7 @@ const updateKpiEntry = useCallback(async (kpiEntryId: string, updates: Partial<P
             let userFriendlyMessage = `Lỗi khi cập nhật báo cáo: ${errorMessageStr}${errorDetailsStr}`;
 
             if (errorMessageStr.toLowerCase().includes('security policy') || errorMessageStr.toLowerCase().includes('permission denied')) {
-                 userFriendlyMessage = `Lỗi quyền truy cập: Không thể cập nhật KPI. Vui lòng kiểm tra chính sách RLS trên bảng "kpi_entries" và đảm bảo quyền UPDATE được bật. Tham khảo trang Hướng dẫn Cài đặt.`;
+                 userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền cập nhật KPI.`;
             }
             addToast(userFriendlyMessage, 'error');
             return;
@@ -450,9 +472,9 @@ const updateMonthlyPayment = useCallback(async (monthId: string, proofUrl: strin
             let userFriendlyMessage = `Lỗi khi cập nhật thanh toán: ${errorMessageStr}${errorDetailsStr}`;
 
             if (errorMessageStr.toLowerCase().includes('security policy') || errorMessageStr.toLowerCase().includes('permission denied')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Không thể cập nhật thanh toán. Vui lòng kiểm tra chính sách RLS trên bảng "monthly_breakdown" và đảm bảo quyền UPDATE được bật. Tham khảo trang Hướng dẫn Cài đặt.`;
+                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền cập nhật thanh toán.`;
             } else if (errorMessageStr.toLowerCase().includes("could not find the 'payment_proof_url' column")) {
-                userFriendlyMessage = `Lỗi Cấu trúc Cơ sở dữ liệu: Không tìm thấy cột 'payment_proof_url'. Có thể CSDL của bạn đã cũ. Vui lòng chạy lại mã SQL trong Hướng dẫn Cài đặt để cập nhật bảng 'monthly_breakdown'.`;
+                userFriendlyMessage = `Lỗi Cấu trúc Cơ sở dữ liệu: Không tìm thấy cột 'payment_proof_url'.`;
             }
             addToast(userFriendlyMessage, 'error');
             return;
@@ -484,7 +506,7 @@ const updateInstallmentPayment = useCallback(async (installmentId: string, proof
             let userFriendlyMessage = `Lỗi khi cập nhật thanh toán đợt: ${errorMessageStr}${errorDetailsStr}`;
 
             if (errorMessageStr.toLowerCase().includes('security policy') || errorMessageStr.toLowerCase().includes('permission denied')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Không thể cập nhật thanh toán. Vui lòng kiểm tra chính sách RLS trên bảng "payment_installments" và đảm bảo quyền UPDATE được bật.`;
+                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền cập nhật thanh toán.`;
             }
             addToast(userFriendlyMessage, 'error');
             return;
@@ -514,7 +536,7 @@ const updateKpiConfirmation = useCallback(async (kpiEntryId: string, confirmatio
             let userFriendlyMessage = `Lỗi khi cập nhật xác nhận: ${errorMessageStr}${errorDetailsStr}`;
 
             if (errorMessageStr.toLowerCase().includes('security policy')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Không thể cập nhật xác nhận. Vui lòng kiểm tra chính sách RLS trên bảng "kpi_entries" và đảm bảo quyền UPDATE được bật.`;
+                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền cập nhật xác nhận.`;
             }
             addToast(userFriendlyMessage, 'error');
             return;
@@ -544,7 +566,7 @@ const updateProjectName = useCallback(async (projectId: string, newName: string)
             let userFriendlyMessage = `Lỗi khi cập nhật tên dự án: ${errorMessageStr}${errorDetailsStr}`;
 
             if (errorMessageStr.toLowerCase().includes('security policy')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Không thể cập nhật tên dự án. Vui lòng kiểm tra chính sách RLS trên bảng "projects" và đảm bảo quyền UPDATE được bật.`;
+                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền cập nhật tên dự án.`;
             }
             addToast(userFriendlyMessage, 'error');
             return;
@@ -574,7 +596,7 @@ const updateLookerStudioUrl = useCallback(async (projectId: string, url: string 
             let userFriendlyMessage = `Lỗi khi cập nhật URL báo cáo: ${errorMessageStr}${errorDetailsStr}`;
 
             if (errorMessageStr.toLowerCase().includes('security policy')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Không thể cập nhật URL. Vui lòng kiểm tra chính sách RLS trên bảng "projects" và đảm bảo quyền UPDATE được bật.`;
+                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền cập nhật URL.`;
             }
             addToast(userFriendlyMessage, 'error');
             return;
@@ -607,7 +629,7 @@ const updateKpiCommissionStatus = useCallback(async (kpiEntryId: string) => {
             let userFriendlyMessage = `Lỗi khi cập nhật hoa hồng: ${errorMessageStr}${errorDetailsStr}`;
 
             if (errorMessageStr.toLowerCase().includes('security policy')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Không thể cập nhật hoa hồng. Vui lòng kiểm tra chính sách RLS trên bảng "kpi_entries".`;
+                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền cập nhật hoa hồng.`;
             }
             addToast(userFriendlyMessage, 'error');
             return;
@@ -671,24 +693,6 @@ const updateKpiCommissionStatus = useCallback(async (kpiEntryId: string) => {
                 <p className="font-semibold text-red-800">Chi tiết lỗi:</p>
                 <pre className="mt-2 text-sm text-red-700 whitespace-pre-wrap font-mono">{error}</pre>
             </div>
-
-            <div className="text-left bg-yellow-50 p-4 rounded-md border border-yellow-200">
-                <h3 className="font-semibold text-yellow-800">Các bước khắc phục sự cố phổ biến:</h3>
-                <ul className="list-disc list-inside mt-2 space-y-2 text-yellow-900 text-sm">
-                    <li>
-                        <strong>Kiểm tra thông tin xác thực:</strong> Đảm bảo <code className="bg-yellow-200 font-mono p-1 rounded-sm">supabaseUrl</code> và <code className="bg-yellow-200 font-mono p-1 rounded-sm">supabaseAnonKey</code> trong file <code className="bg-yellow-200 font-mono p-1 rounded-sm">lib/supabaseClient.ts</code> là chính xác.
-                    </li>
-                    <li>
-                        <strong>Thiết lập cơ sở dữ liệu:</strong> Nếu bạn thấy lỗi "relation does not exist", điều đó có nghĩa là các bảng của bạn chưa được tạo. Bạn cần chạy các lệnh SQL để thiết lập schema trong Supabase SQL Editor.
-                    </li>
-                    <li>
-                        <strong>Kiểm tra chính sách RLS:</strong> Lỗi "violates row-level security policy" có nghĩa là bạn cần thiết lập các quy tắc trong Supabase để cho phép ứng dụng đọc dữ liệu từ các bảng của bạn. Hãy đảm bảo bạn có chính sách `SELECT` cho người dùng `anon` hoặc `authenticated`.
-                    </li>
-                     <li>
-                        <strong>Kiểm tra kết nối mạng:</strong> Đảm bảo bạn có kết nối internet ổn định.
-                    </li>
-                </ul>
-            </div>
             
             <div className="text-center">
                 <button
@@ -726,10 +730,20 @@ const updateKpiCommissionStatus = useCallback(async (kpiEntryId: string) => {
               fetchProjects={fetchAllData} 
             />} 
           />
-          <Route path="/setup" element={<SetupGuide />} />
-          <Route path="/management" element={<ManagementPage staff={staff} commissionConfigs={commissionConfigs} departments={departments} positions={positions} refetchData={fetchAllData} />} />
+          {/* Protected Routes for Admin */}
+          {isAdmin && (
+            <>
+                <Route path="/setup" element={<SetupGuide />} />
+                <Route path="/management" element={<ManagementPage staff={staff} commissionConfigs={commissionConfigs} departments={departments} positions={positions} refetchData={fetchAllData} />} />
+                <Route path="/admin/users" element={<UserManagementPage />} />
+            </>
+          )}
+          
           <Route path="/commission-report" element={<CommissionReportPage projects={projects} staff={staff} commissionConfigs={commissionConfigs} />} />
           <Route path="/commission-payroll" element={<CommissionPayrollPage projects={projects} staff={staff} commissionConfigs={commissionConfigs} />} />
+          
+          {/* Fallback for unauthorized access to admin pages */}
+          <Route path="*" element={<div className="text-center py-20 text-gray-500">Trang không tồn tại hoặc bạn không có quyền truy cập.</div>} />
         </Routes>
       </main>
       <BottomNavBar />

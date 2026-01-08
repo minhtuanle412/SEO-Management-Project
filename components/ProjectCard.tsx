@@ -25,15 +25,15 @@ const slugify = (text: string): string => {
 
 const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
   // Calculate KPI progress based on achieved months
-  const latestKpiByContractMonth = project.kpiEntries.reduce((acc, entry) => {
+  const latestKpiByContractMonth = project.kpiEntries.reduce<Record<string, KpiEntry>>((acc, entry) => {
     if (!acc[entry.contractMonth] || acc[entry.contractMonth].actualMonth < entry.actualMonth) {
         acc[entry.contractMonth] = entry;
     }
     return acc;
-  }, {} as { [key: string]: KpiEntry });
+  }, {});
 
   const achievedKpiMonths = Object.values(latestKpiByContractMonth).filter(
-      (entry) => entry.kpiPercentage >= 75
+      (entry: KpiEntry) => entry.kpiPercentage >= 75
   ).length;
   const kpiProgressPercentage = (achievedKpiMonths / project.durationMonths) * 100;
 

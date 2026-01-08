@@ -1,3 +1,4 @@
+
 export enum PaymentStatus {
   Paid = 'Đã thanh toán',
   Unpaid = 'Chưa thanh toán',
@@ -18,6 +19,19 @@ export enum PaymentType {
   Monthly = 'monthly',
   Milestone = 'milestone',
 }
+
+// --- AUTH & ROLES ---
+export type UserRole = 'admin' | 'manager' | 'staff';
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  full_name: string;
+  avatar_url?: string;
+  role: UserRole;
+  created_at: string;
+}
+// --------------------
 
 export interface KpiEntry {
   id: string;
