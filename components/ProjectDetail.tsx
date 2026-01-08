@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useRef, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Project, MonthlyProgress, PaymentStatus, ReportStatus, KpiEntry, PaymentType, PaymentInstallment, CommissionStatus, Staff } from '../types';
@@ -1232,12 +1233,12 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projects, allStaff, addKp
     if (!project) return null;
 
     // 1. KPI stats
-    const latestKpiByContractMonth = project.kpiEntries.reduce<Record<string, KpiEntry>>((acc, entry) => {
+    const latestKpiByContractMonth = project.kpiEntries.reduce((acc, entry) => {
         if (!acc[entry.contractMonth] || acc[entry.contractMonth].actualMonth < entry.actualMonth) {
             acc[entry.contractMonth] = entry;
         }
         return acc;
-    }, {});
+    }, {} as Record<string, KpiEntry>);
     const latestKpiEntries = Object.values(latestKpiByContractMonth) as KpiEntry[];
     const achievedKpiMonths = latestKpiEntries.filter(entry => entry.kpiPercentage >= 75).length;
     const kpiProgressPercentage = project.durationMonths > 0 ? (achievedKpiMonths / project.durationMonths) * 100 : 0;

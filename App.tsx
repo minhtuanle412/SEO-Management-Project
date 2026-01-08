@@ -321,6 +321,10 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     if (user) {
         fetchAllData();
+    } else {
+        // Nếu không có user, đảm bảo loading dữ liệu (data loading) được tắt
+        // Điều này ngăn trường hợp authLoading=false (đã xác định là guest) nhưng loading=true (vẫn đang đợi dữ liệu)
+        setLoading(false);
     }
   }, [fetchAllData, user]);
 

@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Project, PaymentStatus, KpiEntry, PaymentType } from '../types';
@@ -25,12 +26,12 @@ const slugify = (text: string): string => {
 
 const ProjectCard: React.FC<ProjectCardProps> = ({ project }) => {
   // Calculate KPI progress based on achieved months
-  const latestKpiByContractMonth = project.kpiEntries.reduce<Record<string, KpiEntry>>((acc, entry) => {
+  const latestKpiByContractMonth = project.kpiEntries.reduce((acc, entry) => {
     if (!acc[entry.contractMonth] || acc[entry.contractMonth].actualMonth < entry.actualMonth) {
         acc[entry.contractMonth] = entry;
     }
     return acc;
-  }, {});
+  }, {} as Record<string, KpiEntry>);
 
   const achievedKpiMonths = Object.values(latestKpiByContractMonth).filter(
       (entry: KpiEntry) => entry.kpiPercentage >= 75
