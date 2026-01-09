@@ -26,9 +26,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Helper function to fetch profile with a timeout
   const fetchProfile = async (userId: string) => {
     try {
-      // Create a timeout promise (4 seconds)
+      // Tăng timeout lên 10s để tránh lỗi mạng chậm làm mất quyền
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Profile fetch timed out')), 4000)
+        setTimeout(() => reject(new Error('Profile fetch timed out')), 10000)
       );
 
       const dbPromise = supabase
@@ -76,7 +76,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (initialSession?.user) {
                     // Fetch profile if user exists
                     const userProfile = await fetchProfile(initialSession.user.id);
-                    if (mounted.current) setProfile(userProfile);
+                    if (mounted.current && userProfile) {
+                        setProfile(userProfile);
+                    }
                 }
             }
         } catch (error) {
@@ -106,7 +108,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (currentSession?.user) {
             // Re-fetch profile on sign in or token refresh
             const userProfile = await fetchProfile(currentSession.user.id);
-            if (mounted.current) setProfile(userProfile);
+            
+            if (mounted.current) {
+                // QUAN TRỌNG: Chỉ cập nhật nếu lấy được profile hợp lệ.
+                // Nếu fetchProfile trả về null (do lỗi mạng), giữ nguyên profile cũ 
+                // để tránh tình trạng Admin bị mất menu Quản lý.
+                if (userProfile) {
+                    setProfile(userProfile);
+                }
+            }
         } else {
             if (mounted.current) setProfile(null);
         }
