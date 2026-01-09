@@ -128,78 +128,83 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, addProject }) => {
       </div>
 
       {/* Control Bar: Search & Filters */}
-      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-6 flex flex-col lg:flex-row gap-4">
-        {/* Search */}
-        <div className="relative flex-grow">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <SearchIcon className="h-5 w-5 text-gray-400" />
-            </div>
-            <input
-                type="text"
-                className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-primary focus:border-primary sm:text-sm"
-                placeholder="Tìm kiếm theo tên dự án, khách hàng..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-            />
-        </div>
-
-        {/* Filters Group */}
-        <div className="flex flex-wrap gap-2 items-center w-full lg:w-auto">
-            
-            {/* Leader Filter */}
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-                <UserIcon className="h-5 w-5 text-gray-500 hidden sm:block" />
-                <select
-                    value={leaderFilter}
-                    onChange={(e) => setLeaderFilter(e.target.value)}
-                    className="block w-full sm:w-auto pl-3 pr-8 py-2 border border-gray-300 bg-white rounded-md focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
-                >
-                    <option value="all">Tất cả Leader</option>
-                    {availableLeaders.map(leader => (
-                        <option key={leader.id} value={leader.id}>
-                            {leader.ho_ten}
-                        </option>
-                    ))}
-                </select>
+      <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-6">
+        <div className="flex flex-col xl:flex-row gap-4 justify-between xl:items-center">
+            {/* Search - Chiếm 100% trên màn hình nhỏ, tối đa 400px trên màn hình lớn */}
+            <div className="relative w-full xl:max-w-md">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <SearchIcon className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                    type="text"
+                    className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-primary focus:border-primary sm:text-sm"
+                    placeholder="Tìm kiếm theo tên dự án, khách hàng..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                />
             </div>
 
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-                <FilterIcon className="h-5 w-5 text-gray-500 hidden sm:block" />
-                <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value as StatusFilterType)}
-                    className="block w-full sm:w-auto pl-3 pr-8 py-2 border border-gray-300 bg-white rounded-md focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
-                >
-                    <option value="all">Tất cả trạng thái</option>
-                    <option value="running">Đang chạy</option>
-                    <option value="ending_soon">Sắp kết thúc (&lt;30 ngày)</option>
-                    <option value="finished">Đã kết thúc</option>
-                </select>
-            </div>
+            {/* Filters Group - Dùng flex-wrap để tự động xuống dòng */}
+            <div className="flex flex-wrap gap-3 items-center w-full xl:w-auto xl:justify-end">
+                
+                {/* Leader Filter */}
+                <div className="flex items-center gap-2 w-full sm:w-auto min-w-[150px]">
+                    <UserIcon className="h-5 w-5 text-gray-500 hidden sm:block flex-shrink-0" />
+                    <select
+                        value={leaderFilter}
+                        onChange={(e) => setLeaderFilter(e.target.value)}
+                        className="block w-full pl-3 pr-8 py-2 border border-gray-300 bg-white rounded-md focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
+                    >
+                        <option value="all">Tất cả Leader</option>
+                        {availableLeaders.map(leader => (
+                            <option key={leader.id} value={leader.id}>
+                                {leader.ho_ten}
+                            </option>
+                        ))}
+                    </select>
+                </div>
 
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-                <select
-                    value={debtFilter}
-                    onChange={(e) => setDebtFilter(e.target.value as DebtFilterType)}
-                    className={`block w-full sm:w-auto pl-3 pr-8 py-2 border rounded-md focus:outline-none focus:ring-primary focus:border-primary sm:text-sm ${debtFilter === 'has_debt' ? 'border-red-300 bg-red-50 text-red-800 font-medium' : 'border-gray-300 bg-white'}`}
-                >
-                    <option value="all">Tất cả công nợ</option>
-                    <option value="has_debt">Đang nợ phí</option>
-                </select>
-            </div>
+                {/* Status Filter */}
+                <div className="flex items-center gap-2 w-full sm:w-auto min-w-[150px]">
+                    <FilterIcon className="h-5 w-5 text-gray-500 hidden sm:block flex-shrink-0" />
+                    <select
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value as StatusFilterType)}
+                        className="block w-full pl-3 pr-8 py-2 border border-gray-300 bg-white rounded-md focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
+                    >
+                        <option value="all">Tất cả trạng thái</option>
+                        <option value="running">Đang chạy</option>
+                        <option value="ending_soon">Sắp kết thúc (&lt;30 ngày)</option>
+                        <option value="finished">Đã kết thúc</option>
+                    </select>
+                </div>
 
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-                <span className="text-sm text-gray-500 whitespace-nowrap hidden sm:inline">Sắp xếp:</span>
-                <select 
-                    id="sort" 
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as SortByType)}
-                    className="block w-full sm:w-auto pl-3 pr-8 py-2 border border-gray-300 bg-white rounded-md focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
-                >
-                    <option value="startDateDesc">Mới nhất</option>
-                    <option value="startDateAsc">Cũ nhất</option>
-                    <option value="clientAsc">Tên khách hàng</option>
-                </select>
+                {/* Debt Filter */}
+                <div className="flex items-center gap-2 w-full sm:w-auto min-w-[150px]">
+                    <select
+                        value={debtFilter}
+                        onChange={(e) => setDebtFilter(e.target.value as DebtFilterType)}
+                        className={`block w-full pl-3 pr-8 py-2 border rounded-md focus:outline-none focus:ring-primary focus:border-primary sm:text-sm ${debtFilter === 'has_debt' ? 'border-red-300 bg-red-50 text-red-800 font-medium' : 'border-gray-300 bg-white'}`}
+                    >
+                        <option value="all">Tất cả công nợ</option>
+                        <option value="has_debt">Đang nợ phí</option>
+                    </select>
+                </div>
+
+                {/* Sort */}
+                <div className="flex items-center gap-2 w-full sm:w-auto min-w-[180px]">
+                    <span className="text-sm text-gray-500 whitespace-nowrap hidden lg:inline">Sắp xếp:</span>
+                    <select 
+                        id="sort" 
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value as SortByType)}
+                        className="block w-full pl-3 pr-8 py-2 border border-gray-300 bg-white rounded-md focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
+                    >
+                        <option value="startDateDesc">Mới nhất</option>
+                        <option value="startDateAsc">Cũ nhất</option>
+                        <option value="clientAsc">Tên khách hàng</option>
+                    </select>
+                </div>
             </div>
         </div>
       </div>
