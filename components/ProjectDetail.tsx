@@ -1341,18 +1341,23 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projects, allStaff, addKp
 
   return (
     <div className="container mx-auto">
-      <div className="flex justify-between items-start mb-4">
-        <div className="flex items-center gap-3 flex-wrap">
-          {!isEditingName ? (
+      <div className="mb-4">
+        <Link to="/" className="inline-flex items-center text-gray-500 hover:text-primary transition-colors font-medium text-sm">
+            <ArrowLeftIcon className="h-4 w-4 mr-1" />
+            Quay lại Danh sách dự án
+        </Link>
+      </div>
+      <div className="flex items-center gap-3 mb-6">
+        {!isEditingName ? (
             <>
-              <h1 className="text-3xl font-bold text-dark">{project.name}</h1>
-              <button onClick={handleStartEdit} className="text-gray-500 hover:text-primary transition-colors p-1 rounded-full" title="Chỉnh sửa tên dự án">
-                  <PencilIcon className="h-5 w-5" />
-              </button>
+                <h1 className="text-3xl font-bold text-dark">{project.name}</h1>
+                <button onClick={handleStartEdit} className="text-gray-500 hover:text-primary transition-colors p-1 rounded-full" title="Chỉnh sửa tên dự án">
+                    <PencilIcon className="h-5 w-5" />
+                </button>
             </>
-          ) : (
+        ) : (
             <div className="flex items-center gap-2 w-full max-w-md">
-              <input 
+                <input 
                 type="text"
                 value={editedName}
                 onChange={(e) => setEditedName(e.target.value)}
@@ -1360,20 +1365,15 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projects, allStaff, addKp
                 disabled={isSavingName}
                 autoFocus
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') handleCancelEdit(); }}
-              />
-              <button onClick={handleSaveName} className="bg-primary text-white font-bold py-2 px-4 rounded-lg shadow-md hover:bg-blue-700 transition duration-300 disabled:bg-blue-300 disabled:cursor-wait" disabled={isSavingName}>
+                />
+                <button onClick={handleSaveName} className="bg-primary text-white font-bold py-2 px-4 rounded-lg shadow-md hover:bg-blue-700 transition duration-300 disabled:bg-blue-300 disabled:cursor-wait" disabled={isSavingName}>
                 {isSavingName ? <SpinnerIcon className="h-5 w-5"/> : 'Lưu'}
-              </button>
-              <button onClick={handleCancelEdit} className="bg-gray-200 text-gray-700 font-bold py-2 px-4 rounded-lg hover:bg-gray-300 transition duration-300 disabled:opacity-50" disabled={isSavingName}>
+                </button>
+                <button onClick={handleCancelEdit} className="bg-gray-200 text-gray-700 font-bold py-2 px-4 rounded-lg hover:bg-gray-300 transition duration-300 disabled:opacity-50" disabled={isSavingName}>
                 Hủy
-              </button>
+                </button>
             </div>
-          )}
-        </div>
-        <Link to="/" className="inline-flex items-center text-primary hover:text-blue-700 font-semibold text-sm flex-shrink-0 ml-4">
-            <ArrowLeftIcon className="h-4 w-4 mr-1" />
-            Quay lại Danh sách dự án
-        </Link>
+        )}
       </div>
 
       {overviewStats && (

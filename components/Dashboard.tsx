@@ -1,9 +1,9 @@
 
 import React, { useState, useMemo } from 'react';
-import { Project, PaymentStatus, PaymentType } from '../types';
+import { Project, PaymentStatus, PaymentType, Staff } from '../types';
 import ProjectCard from './ProjectCard';
 import AddProjectModal from './AddProjectModal';
-import { PlusIcon, SearchIcon, FilterIcon } from './Icons';
+import { PlusIcon, SearchIcon, FilterIcon, UserIcon } from './Icons';
 import { addMonths, isPast, differenceInDays } from 'date-fns';
 
 interface DashboardProps {
@@ -21,6 +21,23 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, addProject }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilterType>('all');
   const [debtFilter, setDebtFilter] = useState<DebtFilterType>('all');
+  const [leaderFilter, setLeaderFilter] = useState<string>('all');
+
+  // Lấy danh sách các Leader duy nhất từ dữ liệu phân công của các dự án
+  const availableLeaders = useMemo(() => {
+    const leadersMap = new Map<string, Staff>();
+    projects.forEach(p => {
+        if (p.assignments) {
+            p.assignments.forEach(a => {
+                // Lọc theo yêu cầu: Chức vụ có chứa từ "Leader" (VD: Leader Phòng PSP)
+                if (a.nhan_su?.chuc_vu?.name && a.nhan_su.chuc_vu.name.toLowerCase().includes('leader')) {
+                    leadersMap.set(a.nhan_su.id, a.nhan_su);
+                }
+            });
+        }
+    });
+    return Array.from(leadersMap.values()).sort((a, b) => a.ho_ten.localeCompare(b.ho_ten));
+  }, [projects]);
 
   const filteredProjects = useMemo(() => {
     let result = [...projects];
@@ -73,7 +90,14 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, addProject }) => {
         });
     }
 
-    // 4. Sort
+    // 4. Leader Filter
+    if (leaderFilter !== 'all') {
+        result = result.filter(p => 
+            p.assignments && p.assignments.some(a => a.nhan_su_id === leaderFilter)
+        );
+    }
+
+    // 5. Sort
     switch (sortBy) {
       case 'startDateAsc':
         result.sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
@@ -87,7 +111,7 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, addProject }) => {
         break;
     }
     return result;
-  }, [projects, searchTerm, statusFilter, debtFilter, sortBy]);
+  }, [projects, searchTerm, statusFilter, debtFilter, leaderFilter, sortBy]);
 
   return (
     <div className="container mx-auto">
@@ -121,6 +145,24 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, addProject }) => {
 
         {/* Filters Group */}
         <div className="flex flex-wrap gap-2 items-center w-full lg:w-auto">
+            
+            {/* Leader Filter */}
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+                <UserIcon className="h-5 w-5 text-gray-500 hidden sm:block" />
+                <select
+                    value={leaderFilter}
+                    onChange={(e) => setLeaderFilter(e.target.value)}
+                    className="block w-full sm:w-auto pl-3 pr-8 py-2 border border-gray-300 bg-white rounded-md focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
+                >
+                    <option value="all">Tất cả Leader</option>
+                    {availableLeaders.map(leader => (
+                        <option key={leader.id} value={leader.id}>
+                            {leader.ho_ten}
+                        </option>
+                    ))}
+                </select>
+            </div>
+
             <div className="flex items-center gap-2 w-full sm:w-auto">
                 <FilterIcon className="h-5 w-5 text-gray-500 hidden sm:block" />
                 <select
@@ -174,7 +216,7 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, addProject }) => {
           <h2 className="text-xl text-gray-500">Không tìm thấy dự án nào phù hợp.</h2>
           <p className="mt-2 text-gray-400">Vui lòng thử lại với từ khóa hoặc bộ lọc khác.</p>
           <button 
-            onClick={() => { setSearchTerm(''); setStatusFilter('all'); setDebtFilter('all'); }}
+            onClick={() => { setSearchTerm(''); setStatusFilter('all'); setDebtFilter('all'); setLeaderFilter('all'); }}
             className="mt-4 text-primary hover:underline font-medium"
           >
             Xóa bộ lọc
