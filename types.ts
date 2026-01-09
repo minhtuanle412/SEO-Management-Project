@@ -94,6 +94,18 @@ export interface CommissionConfig {
   ty_le_hoa_hong: number; // e.g., 5 for 5%
 }
 
+export interface CommissionPayout {
+  id: string;
+  project_id: string;
+  staff_id: string;
+  amount: number;
+  month: string; // YYYY-MM format
+  created_at: string;
+  // Các trường join (được lấy kèm khi query)
+  nhan_su?: Staff;
+  project?: Project; // Cẩn thận vòng lặp nếu Project chứa CommissionPayout
+}
+
 // --- END NEW TYPES ---
 
 export interface Project {

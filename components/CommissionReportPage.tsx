@@ -1,10 +1,18 @@
-import React, { useState, useMemo } from 'react';
-import { Project, Staff, CommissionConfig, PaymentStatus, ReportStatus, PaymentType } from '../types';
-// Fix: The error indicates startOfMonth is not exported, possibly due to a date-fns version issue.
-// This is resolved by removing the dependency on startOfMonth and endOfMonth, and using a more robust
-// string comparison for filtering by month, which also avoids potential timezone issues.
-// Unused imports for getYear and getMonth are also removed.
+
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Project, Staff, CommissionConfig, PaymentStatus, ReportStatus, PaymentType, CommissionPayout } from '../types';
 import { format } from 'date-fns';
+import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
+import { SpinnerIcon, ShieldCheckIcon } from './Icons';
+
+// Simple Lock Icon Component
+const LockClosedIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className={className}>
+    <path fillRule="evenodd" d="M12 1.5a5.25 5.25 0 00-5.25 5.25v3a3 3 0 00-3 3v6.75a3 3 0 003 3h10.5a3 3 0 003-3v-6.75a3 3 0 00-3-3v-3c0-2.9-2.35-5.25-5.25-5.25zm3.75 8.25v-3a3.75 3.75 0 10-7.5 0v3h7.5z" clipRule="evenodd" />
+  </svg>
+);
 
 interface CommissionReportPageProps {
   projects: Project[];
@@ -37,6 +45,14 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
   const [selectedDepartment, setSelectedDepartment] = useState('all');
   const [selectedStaff, setSelectedStaff] = useState('all');
   const [selectedProject, setSelectedProject] = useState('all');
+  
+  // State cho tính năng Chốt sổ (Snapshot)
+  const [payouts, setPayouts] = useState<CommissionPayout[]>([]);
+  const [loadingPayouts, setLoadingPayouts] = useState(false);
+  const [isProcessingLock, setIsProcessingLock] = useState(false);
+  
+  const { isManager } = useAuth(); // Chỉ Manager/Admin mới được chốt sổ
+  const { addToast } = useToast();
 
   const commissionConfigMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -44,19 +60,47 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
     return map;
   }, [commissionConfigs]);
 
-  const calculatedData = useMemo<CalculatedRow[]>(() => {
+  // Fetch Payouts khi thay đổi tháng
+  const fetchPayouts = useCallback(async () => {
+      setLoadingPayouts(true);
+      try {
+          const { data, error } = await supabase
+              .from('commission_payouts')
+              .select('*, nhan_su(*, chuc_vu(*), phong_ban(*))')
+              .eq('month', selectedMonth);
+          
+          if (error) throw error;
+          setPayouts(data as CommissionPayout[]);
+      } catch (err) {
+          console.error("Error fetching payouts:", err);
+          setPayouts([]);
+      } finally {
+          setLoadingPayouts(false);
+      }
+  }, [selectedMonth]);
+
+  useEffect(() => {
+      fetchPayouts();
+  }, [fetchPayouts]);
+
+  // Kiểm tra tháng này đã bị chốt chưa
+  const isMonthLocked = useMemo(() => payouts.length > 0, [payouts]);
+
+  // Logic 1: Tính toán "Dự kiến" (Khi chưa chốt)
+  const calculatedForecastData = useMemo<CalculatedRow[]>(() => {
+    // Nếu đã chốt, không cần tính toán dự kiến làm gì cho nặng máy (trừ khi muốn so sánh, nhưng ở đây ta ẩn đi)
+    if (isMonthLocked) return []; 
+
     const data: CalculatedRow[] = [];
 
     projects.forEach(project => {
       const monthlyRevenue = project.durationMonths > 0 ? Math.round(project.totalBudget / project.durationMonths) : 0;
       
       project.kpiEntries.forEach(kpi => {
-        // The kpi.actualMonth is a YYYY-MM-DD string. We compare its YYYY-MM part with selectedMonth.
         if (kpi.actualMonth.substring(0, 7) !== selectedMonth) {
-            return; // Skip if not in the selected month
+            return; 
         }
         
-        // Check Payment Status
         const monthBreakdown = project.monthlyBreakdown.find(m => m.month === kpi.contractMonth);
         let paymentStatus = PaymentStatus.Unpaid;
         if (monthBreakdown) {
@@ -98,16 +142,74 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
       });
     });
     return data.sort((a,b) => a.projectName.localeCompare(b.projectName) || a.contractMonth - b.contractMonth);
-  }, [projects, selectedMonth, commissionConfigMap]);
-  
+  }, [projects, selectedMonth, commissionConfigMap, isMonthLocked]);
+
+  // Logic 2: Dữ liệu "Lịch sử" (Khi đã chốt)
+  const snapshotData = useMemo<CalculatedRow[]>(() => {
+    if (!isMonthLocked) return [];
+
+    // Group payouts by Project ID to reconstruct the rows
+    const groupedPayouts = new Map<string, CommissionPayout[]>();
+    payouts.forEach(p => {
+        const key = p.project_id;
+        if (!groupedPayouts.has(key)) groupedPayouts.set(key, []);
+        groupedPayouts.get(key)!.push(p);
+    });
+
+    const data: CalculatedRow[] = [];
+    
+    // Duyệt qua từng dự án có trong snapshot
+    groupedPayouts.forEach((projectPayouts, projectId) => {
+        const project = projects.find(p => p.id === projectId);
+        if (!project) return; // Dự án đã bị xóa? Vẫn có thể hiển thị nếu muốn, nhưng ở đây skip cho an toàn.
+
+        // Tìm KPI Entry tương ứng với tháng snapshot này để lấy thông tin KPI/Status
+        // (Lưu ý: Thông tin này có thể thay đổi, nhưng số tiền hoa hồng thì đã chốt cứng)
+        const kpiEntry = project.kpiEntries.find(k => k.actualMonth.substring(0, 7) === selectedMonth);
+        
+        // Giá trị mặc định nếu không tìm thấy KPI (trường hợp hiếm)
+        const kpiPercentage = kpiEntry?.kpiPercentage || 0;
+        const reportStatus = kpiEntry?.reportStatus || ReportStatus.NotSent;
+        const contractMonth = kpiEntry?.contractMonth || 0;
+        
+        // Reconstruct assignments from payout history
+        const assignments = projectPayouts.map(p => ({
+            staffId: p.staff_id,
+            staffName: p.nhan_su?.ho_ten || 'Unknown',
+            department: p.nhan_su?.phong_ban?.name || 'Unknown',
+            position: p.nhan_su?.chuc_vu?.name || 'Unknown',
+            commissionAmount: p.amount
+        }));
+
+        data.push({
+            projectId: project.id,
+            projectName: project.name,
+            client: project.client,
+            contractMonth: contractMonth,
+            actualMonth: selectedMonth + "-01", // Fake date
+            monthlyRevenue: 0, // Không quan trọng ở view lịch sử vì tiền đã chốt
+            kpiPercentage,
+            reportStatus,
+            paymentStatus: PaymentStatus.Paid, // Giả định là đã trả mới có hoa hồng
+            isEligible: true, // Đã chốt nghĩa là hợp lệ
+            assignments
+        });
+    });
+
+    return data.sort((a,b) => a.projectName.localeCompare(b.projectName));
+  }, [payouts, isMonthLocked, projects, selectedMonth]);
+
+  // QUYẾT ĐỊNH HIỂN THỊ DỮ LIỆU NÀO?
+  const finalDisplayData = isMonthLocked ? snapshotData : calculatedForecastData;
+
   const filteredData = useMemo(() => {
-      return calculatedData.filter(row => {
+      return finalDisplayData.filter(row => {
           if (selectedProject !== 'all' && row.projectId !== selectedProject) return false;
           if (selectedDepartment !== 'all' && !row.assignments.some(a => a.department === selectedDepartment)) return false;
           if (selectedStaff !== 'all' && !row.assignments.some(a => a.staffId === selectedStaff)) return false;
           return true;
       });
-  }, [calculatedData, selectedProject, selectedDepartment, selectedStaff]);
+  }, [finalDisplayData, selectedProject, selectedDepartment, selectedStaff]);
   
   const totalCommission = useMemo(() => {
     let total = 0;
@@ -121,17 +223,91 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
         });
     });
     return total;
-}, [filteredData, selectedDepartment, selectedStaff]);
+  }, [filteredData, selectedDepartment, selectedStaff]);
+
+
+  // HÀM CHỐT SỔ
+  const handleLockCommission = async () => {
+    if (!isManager) return;
+    const confirmMessage = `CẢNH BÁO: Bạn đang thực hiện chốt sổ hoa hồng tháng ${selectedMonth}.
+    \n- Dữ liệu sẽ được lưu cứng và KHÔNG THỂ thay đổi sau này.
+    \n- Các thay đổi nhân sự sau thời điểm này sẽ KHÔNG ảnh hưởng đến báo cáo tháng này nữa.
+    \nBạn có chắc chắn muốn tiếp tục?`;
+
+    if (!window.confirm(confirmMessage)) return;
+
+    setIsProcessingLock(true);
+    try {
+        // 1. Chuẩn bị dữ liệu để insert
+        const payoutsToInsert: any[] = [];
+        
+        // Duyệt qua TOÀN BỘ calculatedForecastData (không phải filteredData, để chốt toàn bộ)
+        calculatedForecastData.forEach(row => {
+            row.assignments.forEach(assign => {
+                if (assign.commissionAmount > 0) {
+                    payoutsToInsert.push({
+                        project_id: row.projectId,
+                        staff_id: assign.staffId,
+                        amount: assign.commissionAmount,
+                        month: selectedMonth,
+                        // created_by: supabase.auth.user()?.id // Auto handled by DB or explicit if needed
+                    });
+                }
+            });
+        });
+
+        if (payoutsToInsert.length === 0) {
+            addToast('Không có dữ liệu hoa hồng hợp lệ để chốt.', 'error');
+            return;
+        }
+
+        // 2. Insert vào DB
+        const { error } = await supabase.from('commission_payouts').insert(payoutsToInsert);
+        if (error) throw error;
+
+        addToast(`Đã chốt sổ thành công ${payoutsToInsert.length} bản ghi hoa hồng!`, 'success');
+        
+        // 3. Refresh lại view (Lúc này fetchPayouts sẽ trả về dữ liệu -> View chuyển sang Snapshot Mode)
+        await fetchPayouts();
+
+    } catch (err: any) {
+        console.error("Locking failed:", err);
+        addToast(`Lỗi khi chốt sổ: ${err.message}`, 'error');
+    } finally {
+        setIsProcessingLock(false);
+    }
+  };
 
 
   return (
     <div className="container mx-auto">
-      <h1 className="text-3xl font-bold text-dark mb-6">Hoa hồng theo Dự án</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold text-dark">Hoa hồng theo Dự án</h1>
+        {isManager && !isMonthLocked && !loadingPayouts && calculatedForecastData.length > 0 && (
+             <button 
+                onClick={handleLockCommission} 
+                disabled={isProcessingLock}
+                className="flex items-center gap-2 bg-red-600 text-white font-bold py-2 px-6 rounded-lg shadow-md hover:bg-red-700 transition duration-300 disabled:bg-gray-400"
+             >
+                {isProcessingLock ? <SpinnerIcon className="h-5 w-5"/> : <ShieldCheckIcon className="h-5 w-5" />}
+                <span>Chốt sổ tháng này</span>
+            </button>
+        )}
+      </div>
       
+      {/* FILTER BAR */}
       <div className="bg-white p-4 rounded-lg shadow-sm border mb-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
         <div>
           <label htmlFor="month-select" className="block text-sm font-medium text-gray-700">Tháng/Năm</label>
-          <input type="month" id="month-select" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"/>
+          <div className="relative">
+             <input type="month" id="month-select" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className={`mt-1 block w-full px-3 py-2 border rounded-md ${isMonthLocked ? 'border-red-300 bg-red-50 text-red-900 font-semibold' : 'border-gray-300'}`}/>
+             {isMonthLocked && (
+                 <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center text-red-600 pointer-events-none">
+                     <LockClosedIcon className="h-5 w-5 mr-1"/>
+                     <span className="text-xs font-bold">Đã chốt</span>
+                 </div>
+             )}
+          </div>
         </div>
         <div>
           <label htmlFor="project-select" className="block text-sm font-medium text-gray-700">Dự án</label>
@@ -156,70 +332,86 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
         </div>
       </div>
 
-      <div className="bg-white p-4 rounded-lg shadow-sm border mb-6 flex justify-between items-center">
-        <h3 className="text-xl font-bold text-dark">Tổng hoa hồng tháng {format(new Date(selectedMonth), 'MM/yyyy')}</h3>
+      {/* SUMMARY CARD */}
+      <div className={`p-4 rounded-lg shadow-sm border mb-6 flex justify-between items-center ${isMonthLocked ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'}`}>
+        <div>
+            <h3 className={`text-xl font-bold ${isMonthLocked ? 'text-red-900' : 'text-dark'}`}>
+                Tổng hoa hồng tháng {format(new Date(selectedMonth), 'MM/yyyy')} 
+                {isMonthLocked ? ' (ĐÃ CHỐT SỔ)' : ' (DỰ KIẾN)'}
+            </h3>
+            {isMonthLocked && <p className="text-sm text-red-700 mt-1">Dữ liệu này được lấy từ lịch sử chốt sổ và sẽ không thay đổi.</p>}
+        </div>
         <p className="text-2xl font-bold text-primary">{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(totalCommission)}</p>
       </div>
 
       <div className="bg-white rounded-lg shadow-sm border overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Dự án</th>
-              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Tháng HĐ</th>
-              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Doanh thu</th>
-              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Điều kiện (KPI/BC/TT)</th>
-              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Trạng thái HH</th>
-              <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Phân công & Hoa hồng</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {filteredData.length > 0 ? filteredData.map(row => (
-              <tr key={`${row.projectId}-${row.contractMonth}`}>
-                <td className="px-4 py-4 whitespace-nowrap">
-                  <p className="font-medium text-dark">{row.projectName}</p>
-                  <p className="text-sm text-gray-500">{row.client}</p>
-                </td>
-                <td className="px-4 py-4 whitespace-nowrap text-center font-medium">T{row.contractMonth}</td>
-                <td className="px-4 py-4 whitespace-nowrap font-semibold text-blue-600">{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(row.monthlyRevenue)}</td>
-                <td className="px-4 py-4 whitespace-nowrap">
-                  <div className="flex items-center space-x-2">
-                    <span className={`px-2 py-1 text-xs rounded-full font-semibold ${row.kpiPercentage >= 75 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{row.kpiPercentage}%</span>
-                    <span className={`px-2 py-1 text-xs rounded-full font-semibold ${row.reportStatus === ReportStatus.Sent ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>BC</span>
-                    <span className={`px-2 py-1 text-xs rounded-full font-semibold ${row.paymentStatus === PaymentStatus.Paid ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>TT</span>
-                  </div>
-                </td>
-                <td className="px-4 py-4 whitespace-nowrap">
-                  <span className={`px-3 py-1 text-sm rounded-full font-bold ${row.isEligible ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'}`}>
-                    {row.isEligible ? 'Hợp lệ' : 'Không hợp lệ'}
-                  </span>
-                </td>
-                <td className="px-4 py-4 whitespace-nowrap">
-                    <div className="space-y-2">
-                    {row.assignments
-                        .filter(assignment => {
-                            const departmentMatch = selectedDepartment === 'all' || assignment.department === selectedDepartment;
-                            const staffMatch = selectedStaff === 'all' || assignment.staffId === selectedStaff;
-                            return departmentMatch && staffMatch;
-                        })
-                        .map(a => (
-                        <div key={a.staffId} className="grid grid-cols-2 gap-2 text-sm">
-                            <span className="font-medium text-gray-800">{a.staffName}</span>
-                            <span className={`font-bold text-right ${a.commissionAmount > 0 ? 'text-green-700' : 'text-gray-400'}`}>
-                                {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(a.commissionAmount)}
-                            </span>
-                        </div>
-                    ))}
-                    </div>
-                </td>
-              </tr>
-            )) : (
+        {loadingPayouts ? (
+            <div className="text-center py-10"><SpinnerIcon className="h-8 w-8 text-primary mx-auto"/> <p className="mt-2 text-gray-500">Đang tải dữ liệu...</p></div>
+        ) : (
+            <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
                 <tr>
-                    <td colSpan={6} className="text-center py-16 text-gray-500">Không có dữ liệu hoa hồng cho các lựa chọn hiện tại.</td>
+                <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Dự án</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Tháng HĐ</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Doanh thu</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Trạng thái</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Phân công & Hoa hồng</th>
                 </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+                {filteredData.length > 0 ? filteredData.map(row => (
+                <tr key={`${row.projectId}-${row.contractMonth}`}>
+                    <td className="px-4 py-4 whitespace-nowrap">
+                    <p className="font-medium text-dark">{row.projectName}</p>
+                    <p className="text-sm text-gray-500">{row.client}</p>
+                    </td>
+                    <td className="px-4 py-4 whitespace-nowrap text-center font-medium">T{row.contractMonth}</td>
+                    <td className="px-4 py-4 whitespace-nowrap font-semibold text-blue-600">{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(row.monthlyRevenue)}</td>
+                    <td className="px-4 py-4 whitespace-nowrap">
+                         {isMonthLocked ? (
+                             <span className="px-3 py-1 text-sm rounded-full font-bold bg-red-100 text-red-800 flex items-center w-fit">
+                                <LockClosedIcon className="h-3 w-3 mr-1"/> Đã chốt
+                             </span>
+                         ) : (
+                            <div className="flex flex-col space-y-1">
+                                <span className={`px-2 py-0.5 text-xs rounded-full w-fit ${row.kpiPercentage >= 75 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>KPI: {row.kpiPercentage}%</span>
+                                <span className={`px-2 py-0.5 text-xs rounded-full w-fit ${row.reportStatus === ReportStatus.Sent ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>BC: {row.reportStatus === ReportStatus.Sent ? 'Đã gửi' : 'Chưa'}</span>
+                                <span className={`px-2 py-0.5 text-xs rounded-full w-fit ${row.paymentStatus === PaymentStatus.Paid ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>TT: {row.paymentStatus === PaymentStatus.Paid ? 'Đã TT' : 'Chưa'}</span>
+                                <span className={`px-2 py-0.5 text-xs rounded-full w-fit font-bold ${row.isEligible ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'}`}>{row.isEligible ? 'Hợp lệ' : 'Không'}</span>
+                            </div>
+                         )}
+                    </td>
+                    <td className="px-4 py-4 whitespace-nowrap">
+                        <div className="space-y-2">
+                        {row.assignments
+                            .filter(assignment => {
+                                const departmentMatch = selectedDepartment === 'all' || assignment.department === selectedDepartment;
+                                const staffMatch = selectedStaff === 'all' || assignment.staffId === selectedStaff;
+                                return departmentMatch && staffMatch;
+                            })
+                            .map((a, idx) => (
+                            <div key={`${a.staffId}-${idx}`} className="grid grid-cols-2 gap-2 text-sm">
+                                <span className="font-medium text-gray-800">{a.staffName}</span>
+                                <span className={`font-bold text-right ${a.commissionAmount > 0 ? 'text-green-700' : 'text-gray-400'}`}>
+                                    {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(a.commissionAmount)}
+                                </span>
+                            </div>
+                        ))}
+                        </div>
+                    </td>
+                </tr>
+                )) : (
+                    <tr>
+                        <td colSpan={5} className="text-center py-16 text-gray-500">
+                            {isMonthLocked 
+                                ? "Tháng này đã chốt sổ nhưng không tìm thấy dữ liệu phù hợp với bộ lọc." 
+                                : "Không có dữ liệu hoa hồng dự kiến cho các lựa chọn hiện tại."}
+                        </td>
+                    </tr>
+                )}
+            </tbody>
+            </table>
+        )}
       </div>
     </div>
   );

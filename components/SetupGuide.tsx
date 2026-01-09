@@ -31,11 +31,11 @@ const CodeBlock: React.FC<{ children: string }> = ({ children }) => {
 const SetupGuide: React.FC = () => {
   const masterScript = `
 -- MASTER SCRIPT: CẬP NHẬT TOÀN BỘ DATABASE & QUYỀN (SAFE MODE)
--- Script này an toàn để chạy nhiều lần. Nó sẽ tạo bảng nếu chưa có, thêm cột thiếu, và sửa lỗi phân quyền.
+-- Script này an toàn để chạy nhiều lần.
 
 BEGIN;
 
--- 1. Bảng Projects & Cột mới
+-- 1. Bảng Projects
 CREATE TABLE IF NOT EXISTS public.projects (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
@@ -85,7 +85,7 @@ ALTER TABLE public.kpi_entries ADD COLUMN IF NOT EXISTS customer_confirmation_ur
 ALTER TABLE public.kpi_entries ADD COLUMN IF NOT EXISTS commission_status TEXT DEFAULT 'Không áp dụng';
 ALTER TABLE public.kpi_entries ADD COLUMN IF NOT EXISTS commission_paid_date DATE;
 
--- 5. Các bảng Cấu hình (Phòng ban, Chức vụ, Nhân sự...)
+-- 5. Cấu hình Nhân sự
 CREATE TABLE IF NOT EXISTS public.phong_ban (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT UNIQUE NOT NULL);
 CREATE TABLE IF NOT EXISTS public.chuc_vu (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT UNIQUE NOT NULL);
 
@@ -97,7 +97,6 @@ CREATE TABLE IF NOT EXISTS public.nhan_su (
 ALTER TABLE public.nhan_su ADD COLUMN IF NOT EXISTS phong_ban_id UUID REFERENCES public.phong_ban(id) ON DELETE SET NULL;
 ALTER TABLE public.nhan_su ADD COLUMN IF NOT EXISTS chuc_vu_id UUID REFERENCES public.chuc_vu(id) ON DELETE SET NULL;
 
--- FIX: Loại bỏ ràng buộc NOT NULL cho các cột cũ (nếu có) để tránh lỗi khi thêm nhân sự
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'nhan_su' AND column_name = 'chuc_vu') THEN
@@ -107,7 +106,6 @@ BEGIN
     ALTER TABLE public.nhan_su ALTER COLUMN phong_ban DROP NOT NULL;
   END IF;
 END $$;
-
 
 CREATE TABLE IF NOT EXISTS public.phan_cong_du_an (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -122,18 +120,27 @@ CREATE TABLE IF NOT EXISTS public.cau_hinh_hoa_hong (
 );
 ALTER TABLE public.cau_hinh_hoa_hong ADD COLUMN IF NOT EXISTS chuc_vu_id UUID REFERENCES public.chuc_vu(id) ON DELETE CASCADE UNIQUE;
 
--- 6. Bảng Profiles & ROLE (Khắc phục lỗi thiếu cột Role)
+-- 6. [NEW] Bảng Chốt sổ Hoa hồng (Snapshot)
+CREATE TABLE IF NOT EXISTS public.commission_payouts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
+  staff_id UUID REFERENCES public.nhan_su(id) ON DELETE SET NULL,
+  amount NUMERIC NOT NULL,
+  month VARCHAR(7) NOT NULL, -- Format: YYYY-MM
+  created_at TIMESTAMPTZ DEFAULT now(),
+  created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL
+);
+
+-- 7. Auth & Profiles
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT,
   full_name TEXT,
   avatar_url TEXT,
+  role TEXT DEFAULT 'staff',
   created_at TIMESTAMPTZ DEFAULT now()
 );
--- QUAN TRỌNG: Lệnh này đảm bảo cột role luôn tồn tại
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'staff';
 
--- 7. Trigger tạo user
 CREATE OR REPLACE FUNCTION public.handle_new_user() 
 RETURNS TRIGGER AS $$
 BEGIN
@@ -147,33 +154,53 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
--- Đồng bộ user cũ nếu có
 INSERT INTO public.profiles (id, email) SELECT id, email FROM auth.users ON CONFLICT (id) DO NOTHING;
 
--- 8. Phân quyền (RLS Policies)
--- Reset toàn bộ policies cũ để tránh xung đột
+-- 8. RLS Policies
 DO $$
 DECLARE
-  tabs text[] := ARRAY['projects', 'payment_installments', 'monthly_breakdown', 'kpi_entries', 'nhan_su', 'phong_ban', 'chuc_vu', 'phan_cong_du_an', 'cau_hinh_hoa_hong', 'profiles'];
+  tabs text[] := ARRAY['projects', 'payment_installments', 'monthly_breakdown', 'kpi_entries', 'nhan_su', 'phong_ban', 'chuc_vu', 'phan_cong_du_an', 'cau_hinh_hoa_hong', 'profiles', 'commission_payouts'];
   t text;
 BEGIN
   FOREACH t IN ARRAY tabs LOOP
     EXECUTE format('ALTER TABLE IF EXISTS %I ENABLE ROW LEVEL SECURITY', t);
-    EXECUTE format('DROP POLICY IF EXISTS "Public access" ON %I', t);
-    EXECUTE format('DROP POLICY IF EXISTS "Authenticated access" ON %I', t);
-    EXECUTE format('DROP POLICY IF EXISTS "Admin access" ON %I', t);
-    EXECUTE format('DROP POLICY IF EXISTS "Read access" ON %I', t);
-    EXECUTE format('DROP POLICY IF EXISTS "Enable all access for all users on %I" ON %I', t, t);
-    EXECUTE format('DROP POLICY IF EXISTS "Allow all for authenticated users" ON %I', t);
-    EXECUTE format('DROP POLICY IF EXISTS "Admin update roles" ON %I', t);
-    EXECUTE format('DROP POLICY IF EXISTS "Enable write access for admins on %I" ON %I', t, t);
   END LOOP;
 END $$;
+
+-- 8.1 XÓA CÁC POLICY CŨ (Để tránh lỗi "already exists" khi chạy lại)
+
+-- Profiles
+DROP POLICY IF EXISTS "Public read profiles" ON public.profiles;
+DROP POLICY IF EXISTS "User update own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Admin update role" ON public.profiles;
+
+-- Config Tables
+DROP POLICY IF EXISTS "Read config" ON public.nhan_su;
+DROP POLICY IF EXISTS "Admin write config" ON public.nhan_su;
+DROP POLICY IF EXISTS "Read config" ON public.phong_ban;
+DROP POLICY IF EXISTS "Admin write config" ON public.phong_ban;
+DROP POLICY IF EXISTS "Read config" ON public.chuc_vu;
+DROP POLICY IF EXISTS "Admin write config" ON public.chuc_vu;
+DROP POLICY IF EXISTS "Read config" ON public.cau_hinh_hoa_hong;
+DROP POLICY IF EXISTS "Admin write config" ON public.cau_hinh_hoa_hong;
+
+-- Commission Payouts
+DROP POLICY IF EXISTS "Auth read payouts" ON public.commission_payouts;
+DROP POLICY IF EXISTS "Manager insert payouts" ON public.commission_payouts;
+
+-- Project Data
+DROP POLICY IF EXISTS "Auth access projects" ON public.projects;
+DROP POLICY IF EXISTS "Auth access installments" ON public.payment_installments;
+DROP POLICY IF EXISTS "Auth access breakdown" ON public.monthly_breakdown;
+DROP POLICY IF EXISTS "Auth access kpi" ON public.kpi_entries;
+DROP POLICY IF EXISTS "Auth access assignments" ON public.phan_cong_du_an;
+
+
+-- 8.2 TẠO LẠI POLICY MỚI
 
 -- Policy cho Profiles
 CREATE POLICY "Public read profiles" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "User update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
--- Chỉ Admin sửa role
 CREATE POLICY "Admin update role" ON public.profiles FOR UPDATE USING (
   (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
 );
@@ -191,7 +218,12 @@ CREATE POLICY "Admin write config" ON public.chuc_vu FOR ALL USING ((SELECT role
 CREATE POLICY "Read config" ON public.cau_hinh_hoa_hong FOR SELECT USING (true);
 CREATE POLICY "Admin write config" ON public.cau_hinh_hoa_hong FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
 
--- Policy cho Dữ liệu Dự án (Authenticated users được sửa để vận hành)
+-- Policy cho Commission Payouts (Ai cũng xem được, chỉ Admin/Manager được tạo)
+CREATE POLICY "Auth read payouts" ON public.commission_payouts FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Manager insert payouts" ON public.commission_payouts FOR INSERT TO authenticated 
+WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'manager'));
+
+-- Policy cho Dữ liệu Dự án
 CREATE POLICY "Auth access projects" ON public.projects FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Auth access installments" ON public.payment_installments FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Auth access breakdown" ON public.monthly_breakdown FOR ALL TO authenticated USING (true) WITH CHECK (true);
@@ -207,22 +239,23 @@ COMMIT;
           <ArrowLeftIcon className="h-4 w-4 mr-1" />
           Quay lại Danh sách dự án
       </Link>
-      <h1 className="text-4xl font-bold text-dark mb-4">Hướng dẫn Cài đặt Supabase</h1>
+      <h1 className="text-4xl font-bold text-dark mb-4">Hướng dẫn Cài đặt & Cập nhật</h1>
+      <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-6">
+        <p className="text-yellow-700 font-bold">CẬP NHẬT MỚI (Sửa lỗi Policy)</p>
+        <p className="text-yellow-700">Script dưới đây đã được cập nhật để xóa các quyền cũ trước khi tạo mới, tránh lỗi "policy already exists". Vui lòng chạy lại toàn bộ.</p>
+      </div>
       <p className="text-gray-600 mb-8">
         Trang này cung cấp các mã lệnh SQL cần thiết để thiết lập cơ sở dữ liệu cho ứng dụng.
       </p>
 
       <div className="space-y-12">
-        
-        {/* MASTER SCRIPT SECTION */}
         <section className="bg-blue-50 border border-blue-200 rounded-xl p-6">
           <div className="flex items-center mb-4">
              <CheckCircleIcon className="h-8 w-8 text-blue-600 mr-3" />
-             <h2 className="text-2xl font-bold text-blue-900">Script Tổng hợp (Khuyên dùng)</h2>
+             <h2 className="text-2xl font-bold text-blue-900">Script Tổng hợp (Safe Mode)</h2>
           </div>
           <p className="text-blue-800 mb-4">
-            Nếu bạn gặp bất kỳ lỗi nào (ví dụ: thiếu cột 'role', lỗi permission denied), hãy chạy đoạn mã dưới đây. 
-            Nó sẽ tự động kiểm tra và sửa chữa toàn bộ cấu trúc database và phân quyền mà <strong>không làm mất dữ liệu hiện có</strong>.
+            Script này sẽ tự động tạo các bảng mới và cập nhật cấu trúc bảng cũ mà <strong>không làm mất dữ liệu</strong>.
           </p>
           <CodeBlock>{masterScript}</CodeBlock>
           
@@ -235,17 +268,15 @@ COMMIT;
           </div>
         </section>
 
-        {/* Storage Bucket Setup */}
         <section>
-          <h2 className="text-2xl font-bold text-dark border-b-2 border-gray-200 pb-2 mb-4">Thiết lập Storage (Lưu trữ ảnh)</h2>
+          <h2 className="text-2xl font-bold text-dark border-b-2 border-gray-200 pb-2 mb-4">Thiết lập Storage</h2>
           <p className="text-gray-700 mb-4">
             Bạn cần tạo 2 bucket công khai (Public) trong menu <strong>Storage</strong> của Supabase:
           </p>
           <ul className="list-disc list-inside space-y-2 text-gray-700 bg-gray-50 p-6 rounded-lg border">
-             <li>Bucket 1: <strong>payment_proofs</strong> (Dùng lưu ảnh chuyển khoản)</li>
-             <li>Bucket 2: <strong>confirmation_proofs</strong> (Dùng lưu ảnh xác nhận KH)</li>
+             <li>Bucket 1: <strong>payment_proofs</strong></li>
+             <li>Bucket 2: <strong>confirmation_proofs</strong></li>
           </ul>
-          <p className="text-gray-500 text-sm mt-2">Lưu ý: Nhớ tick chọn "Public Bucket" khi tạo.</p>
         </section>
 
       </div>
