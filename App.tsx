@@ -251,7 +251,9 @@ const AppContent: React.FC = () => {
   }, []);
 
   const fetchAllData = useCallback(async () => {
-    // Only fetch if config is valid AND user is logged in
+    // Chỉ tải dữ liệu khi đã cấu hình Supabase và có user
+    // LƯU Ý QUAN TRỌNG: Dependency của useCallback này phải là user?.id thay vì user
+    // để tránh việc hàm này bị tạo lại mỗi khi object user thay đổi (do refresh token/switch tab)
     if (!isSupabaseConfigured || !user) {
         setLoading(false);
         return;
@@ -315,7 +317,8 @@ const AppContent: React.FC = () => {
     } finally {
         setLoading(false);
     }
-  }, [isSupabaseConfigured, user]); // Add user dependency
+    // Sử dụng user?.id thay vì user để tránh re-fetch khi object user thay đổi tham chiếu
+  }, [isSupabaseConfigured, user?.id]); 
 
 
   useEffect(() => {
@@ -326,7 +329,9 @@ const AppContent: React.FC = () => {
         // Điều này ngăn trường hợp authLoading=false (đã xác định là guest) nhưng loading=true (vẫn đang đợi dữ liệu)
         setLoading(false);
     }
-  }, [fetchAllData, user]);
+    // Dependency chỉ bao gồm fetchAllData (đã được memoize theo user.id) và user.id
+    // Điều này đảm bảo effect chỉ chạy lại khi ID người dùng thực sự thay đổi
+  }, [fetchAllData, user?.id]);
 
  const addProject = useCallback(async (newProjectData: Omit<Project, 'id' | 'endDate' | 'monthlyBreakdown' | 'kpiEntries' | 'installments' | 'lookerStudioUrl' | 'assignments'>) => {
     if (!isSupabaseConfigured) return;

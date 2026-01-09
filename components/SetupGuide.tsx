@@ -97,6 +97,18 @@ CREATE TABLE IF NOT EXISTS public.nhan_su (
 ALTER TABLE public.nhan_su ADD COLUMN IF NOT EXISTS phong_ban_id UUID REFERENCES public.phong_ban(id) ON DELETE SET NULL;
 ALTER TABLE public.nhan_su ADD COLUMN IF NOT EXISTS chuc_vu_id UUID REFERENCES public.chuc_vu(id) ON DELETE SET NULL;
 
+-- FIX: Loại bỏ ràng buộc NOT NULL cho các cột cũ (nếu có) để tránh lỗi khi thêm nhân sự
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'nhan_su' AND column_name = 'chuc_vu') THEN
+    ALTER TABLE public.nhan_su ALTER COLUMN chuc_vu DROP NOT NULL;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'nhan_su' AND column_name = 'phong_ban') THEN
+    ALTER TABLE public.nhan_su ALTER COLUMN phong_ban DROP NOT NULL;
+  END IF;
+END $$;
+
+
 CREATE TABLE IF NOT EXISTS public.phan_cong_du_an (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
