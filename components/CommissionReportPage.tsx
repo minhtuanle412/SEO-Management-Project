@@ -37,6 +37,7 @@ interface CalculatedRow {
     department: string;
     position: string;
     commissionAmount: number;
+    effortPercentage: number; // Added effort %
   }[];
 }
 
@@ -116,13 +117,20 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
         
         const assignments = project.assignments.map(assignment => {
             const commissionRate = commissionConfigMap.get(assignment.nhan_su.chuc_vu.name) || 0;
-            const commissionAmount = isEligible ? Math.round((monthlyRevenue * commissionRate) / 100) : 0;
+            const effortPercentage = assignment.ty_le_phan_cong ?? 100; // Default 100 if null
+            
+            // Formula: Revenue * Role Rate * (Effort / 100)
+            const commissionAmount = isEligible 
+                ? Math.round((monthlyRevenue * (commissionRate / 100)) * (effortPercentage / 100)) 
+                : 0;
+
             return {
                 staffId: assignment.nhan_su_id,
                 staffName: assignment.nhan_su.ho_ten,
                 department: assignment.nhan_su.phong_ban.name,
                 position: assignment.nhan_su.chuc_vu.name,
                 commissionAmount,
+                effortPercentage,
             };
         });
 
@@ -178,7 +186,8 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
             staffName: p.nhan_su?.ho_ten || 'Unknown',
             department: p.nhan_su?.phong_ban?.name || 'Unknown',
             position: p.nhan_su?.chuc_vu?.name || 'Unknown',
-            commissionAmount: p.amount
+            commissionAmount: p.amount,
+            effortPercentage: p.effort_percentage ?? 100
         }));
 
         data.push({
@@ -250,7 +259,7 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
                         staff_id: assign.staffId,
                         amount: assign.commissionAmount,
                         month: selectedMonth,
-                        // created_by: supabase.auth.user()?.id // Auto handled by DB or explicit if needed
+                        effort_percentage: assign.effortPercentage // Store effort at lock time
                     });
                 }
             });
@@ -395,7 +404,10 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
                             })
                             .map((a, idx) => (
                             <div key={`${a.staffId}-${idx}`} className="grid grid-cols-2 gap-2 text-sm">
-                                <span className="font-medium text-gray-800">{a.staffName}</span>
+                                <span className="font-medium text-gray-800">
+                                    {a.staffName} 
+                                    {a.effortPercentage < 100 && <span className="text-gray-500 text-xs ml-1">({a.effortPercentage}%)</span>}
+                                </span>
                                 <span className={`font-bold text-right ${a.commissionAmount > 0 ? 'text-green-700' : 'text-gray-400'}`}>
                                     {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(a.commissionAmount)}
                                 </span>

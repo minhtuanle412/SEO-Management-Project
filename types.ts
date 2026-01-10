@@ -86,6 +86,7 @@ export interface ProjectAssignment {
   project_id: string;
   nhan_su_id: string;
   nhan_su: Staff;
+  ty_le_phan_cong?: number; // % Contribution (Default 100)
 }
 
 export interface CommissionConfig {
@@ -101,6 +102,7 @@ export interface CommissionPayout {
   amount: number;
   month: string; // YYYY-MM format
   created_at: string;
+  effort_percentage?: number; // Recorded effort % at time of snapshot
   // Các trường join (được lấy kèm khi query)
   nhan_su?: Staff;
   project?: Project; // Cẩn thận vòng lặp nếu Project chứa CommissionPayout

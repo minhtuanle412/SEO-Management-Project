@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS public.phan_cong_du_an (
   nhan_su_id UUID REFERENCES public.nhan_su(id) ON DELETE CASCADE NOT NULL,
   UNIQUE(project_id, nhan_su_id)
 );
+-- [NEW] Thêm cột tỷ lệ phân công cho nhân sự (mặc định 100%)
+ALTER TABLE public.phan_cong_du_an ADD COLUMN IF NOT EXISTS ty_le_phan_cong INT DEFAULT 100;
 
 CREATE TABLE IF NOT EXISTS public.cau_hinh_hoa_hong (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -120,7 +122,7 @@ CREATE TABLE IF NOT EXISTS public.cau_hinh_hoa_hong (
 );
 ALTER TABLE public.cau_hinh_hoa_hong ADD COLUMN IF NOT EXISTS chuc_vu_id UUID REFERENCES public.chuc_vu(id) ON DELETE CASCADE UNIQUE;
 
--- 6. [NEW] Bảng Chốt sổ Hoa hồng (Snapshot)
+-- 6. Bảng Chốt sổ Hoa hồng (Snapshot)
 CREATE TABLE IF NOT EXISTS public.commission_payouts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
@@ -130,6 +132,8 @@ CREATE TABLE IF NOT EXISTS public.commission_payouts (
   created_at TIMESTAMPTZ DEFAULT now(),
   created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL
 );
+-- [NEW] Thêm cột tỷ lệ nỗ lực tại thời điểm chốt (mặc định 100%)
+ALTER TABLE public.commission_payouts ADD COLUMN IF NOT EXISTS effort_percentage INT DEFAULT 100;
 
 -- 7. Auth & Profiles
 CREATE TABLE IF NOT EXISTS public.profiles (
@@ -241,8 +245,8 @@ COMMIT;
       </Link>
       <h1 className="text-4xl font-bold text-dark mb-4">Hướng dẫn Cài đặt & Cập nhật</h1>
       <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-6">
-        <p className="text-yellow-700 font-bold">CẬP NHẬT MỚI (Sửa lỗi Policy)</p>
-        <p className="text-yellow-700">Script dưới đây đã được cập nhật để xóa các quyền cũ trước khi tạo mới, tránh lỗi "policy already exists". Vui lòng chạy lại toàn bộ.</p>
+        <p className="text-yellow-700 font-bold">CẬP NHẬT DATABASE (Quan trọng)</p>
+        <p className="text-yellow-700">Đã cập nhật cấu trúc bảng để hỗ trợ <strong>phân chia tỷ lệ hoa hồng</strong>. Vui lòng copy và chạy lại script bên dưới trong Supabase SQL Editor.</p>
       </div>
       <p className="text-gray-600 mb-8">
         Trang này cung cấp các mã lệnh SQL cần thiết để thiết lập cơ sở dữ liệu cho ứng dụng.

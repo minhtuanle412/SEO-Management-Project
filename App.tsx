@@ -51,6 +51,7 @@ const mapSupabaseProjectAssignment = (item: any): ProjectAssignment => ({
     project_id: item.project_id,
     nhan_su_id: item.nhan_su_id,
     nhan_su: item.nhan_su,
+    ty_le_phan_cong: item.ty_le_phan_cong, // [FIX] Ánh xạ trường này để UI nhận được dữ liệu mới
 });
 
 const mapSupabaseProject = (project: any): Project => ({

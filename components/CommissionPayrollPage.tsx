@@ -30,6 +30,7 @@ interface StaffCommissionSummary {
     client: string;
     monthlyRevenue: number;
     commissionRate: number; // in percent
+    effortPercentage: number; // in percent
     commissionAmount: number;
     contractMonth: number;
     isSnapshot?: boolean; // New flag to indicate source
@@ -47,7 +48,7 @@ const DetailModal: React.FC<{
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
                 <div className="flex justify-between items-center p-4 border-b">
                     <div>
                         <div className="flex items-center gap-2">
@@ -66,6 +67,7 @@ const DetailModal: React.FC<{
                                 <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase">Tháng HĐ</th>
                                 <th className="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Doanh thu</th>
                                 <th className="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Tỷ lệ HH</th>
+                                <th className="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Tỷ lệ Đóng góp</th>
                                 <th className="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase">Tiền Hoa hồng</th>
                             </tr>
                         </thead>
@@ -82,13 +84,20 @@ const DetailModal: React.FC<{
                                     <td className="px-4 py-4 whitespace-nowrap text-right">
                                         {item.commissionRate > 0 ? `${item.commissionRate}%` : '-'}
                                     </td>
+                                    <td className="px-4 py-4 whitespace-nowrap text-right">
+                                        {item.effortPercentage < 100 ? (
+                                            <span className="text-orange-600 font-bold">{item.effortPercentage}%</span>
+                                        ) : (
+                                            <span className="text-gray-500">{item.effortPercentage}%</span>
+                                        )}
+                                    </td>
                                     <td className="px-4 py-4 whitespace-nowrap text-right font-bold text-green-600">{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(item.commissionAmount)}</td>
                                 </tr>
                             ))}
                         </tbody>
                         <tfoot className="bg-gray-50">
                             <tr>
-                                <td colSpan={4} className="px-4 py-3 text-right font-bold">TỔNG CỘNG</td>
+                                <td colSpan={5} className="px-4 py-3 text-right font-bold">TỔNG CỘNG</td>
                                 <td className="px-4 py-3 text-right font-bold text-xl text-primary">{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(summary.totalCommission)}</td>
                             </tr>
                         </tfoot>
@@ -164,7 +173,14 @@ const CommissionPayrollPage: React.FC<CommissionPayrollPageProps> = ({ projects,
             
             // Re-calculate for display (Note: These are estimates based on current data, as snapshot only stores total amount)
             const monthlyRevenue = (project && project.durationMonths > 0) ? Math.round(project.totalBudget / project.durationMonths) : 0;
-            const commissionRate = monthlyRevenue > 0 ? parseFloat(((p.amount / monthlyRevenue) * 100).toFixed(1)) : 0;
+            // Reverse engineering rate is tricky, just show 0 or implied rate. Better to use current config or skip.
+            // Using current config for display reference.
+            const impliedRate = (monthlyRevenue > 0 && p.amount > 0) ? ((p.amount / monthlyRevenue) * 100) : 0;
+            const effortPercentage = p.effort_percentage || 100;
+
+            const commissionRate = (monthlyRevenue > 0 && effortPercentage > 0) 
+                 ? (p.amount / (monthlyRevenue * (effortPercentage/100))) * 100 
+                 : 0;
             
             // Try to find KPI month for display
             let contractMonth = 0;
@@ -178,7 +194,8 @@ const CommissionPayrollPage: React.FC<CommissionPayrollPageProps> = ({ projects,
                 projectName,
                 client,
                 monthlyRevenue,
-                commissionRate,
+                commissionRate: parseFloat(commissionRate.toFixed(1)),
+                effortPercentage,
                 commissionAmount: p.amount,
                 contractMonth,
                 isSnapshot: true
@@ -224,38 +241,40 @@ const CommissionPayrollPage: React.FC<CommissionPayrollPageProps> = ({ projects,
                 if (!isEligible) return;
 
                 project.assignments.forEach(assignment => {
-                const staffInfo = assignment.nhan_su;
-                if (!staffInfo) return;
+                    const staffInfo = assignment.nhan_su;
+                    if (!staffInfo) return;
 
-                const commissionRate = commissionConfigMap.get(staffInfo.chuc_vu.id) || 0;
-                if (commissionRate === 0) return;
+                    const commissionRate = commissionConfigMap.get(staffInfo.chuc_vu.id) || 0;
+                    if (commissionRate === 0) return;
 
-                const commissionAmount = Math.round((monthlyRevenue * commissionRate) / 100);
+                    const effortPercentage = assignment.ty_le_phan_cong ?? 100;
+                    const commissionAmount = Math.round((monthlyRevenue * (commissionRate/100)) * (effortPercentage/100));
 
-                const breakdownItem = {
-                    projectId: project.id,
-                    projectName: project.name,
-                    client: project.client,
-                    monthlyRevenue,
-                    commissionRate,
-                    commissionAmount,
-                    contractMonth: kpi.contractMonth,
-                };
+                    const breakdownItem = {
+                        projectId: project.id,
+                        projectName: project.name,
+                        client: project.client,
+                        monthlyRevenue,
+                        commissionRate,
+                        effortPercentage,
+                        commissionAmount,
+                        contractMonth: kpi.contractMonth,
+                    };
 
-                if (summaryMap.has(staffInfo.id)) {
-                    const existing = summaryMap.get(staffInfo.id)!;
-                    existing.totalCommission += commissionAmount;
-                    existing.breakdown.push(breakdownItem);
-                } else {
-                    summaryMap.set(staffInfo.id, {
-                    staffId: staffInfo.id,
-                    staffName: staffInfo.ho_ten,
-                    position: staffInfo.chuc_vu.name,
-                    department: staffInfo.phong_ban.name,
-                    totalCommission: commissionAmount,
-                    breakdown: [breakdownItem],
-                    });
-                }
+                    if (summaryMap.has(staffInfo.id)) {
+                        const existing = summaryMap.get(staffInfo.id)!;
+                        existing.totalCommission += commissionAmount;
+                        existing.breakdown.push(breakdownItem);
+                    } else {
+                        summaryMap.set(staffInfo.id, {
+                        staffId: staffInfo.id,
+                        staffName: staffInfo.ho_ten,
+                        position: staffInfo.chuc_vu.name,
+                        department: staffInfo.phong_ban.name,
+                        totalCommission: commissionAmount,
+                        breakdown: [breakdownItem],
+                        });
+                    }
                 });
             });
         });
