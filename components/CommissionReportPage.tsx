@@ -283,16 +283,7 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
     <div className="container mx-auto">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-dark">Hoa hồng theo Dự án</h1>
-        {isManager && !isMonthLocked && !loadingPayouts && calculatedForecastData.length > 0 && (
-             <button 
-                onClick={handleLockCommission} 
-                disabled={isProcessingLock}
-                className="flex items-center gap-2 bg-red-600 text-white font-bold py-2 px-6 rounded-lg shadow-md hover:bg-red-700 transition duration-300 disabled:bg-gray-400"
-             >
-                {isProcessingLock ? <SpinnerIcon className="h-5 w-5"/> : <ShieldCheckIcon className="h-5 w-5" />}
-                <span>Chốt sổ tháng này</span>
-            </button>
-        )}
+        {/* Button removed from here */}
       </div>
       
       {/* FILTER BAR */}
@@ -302,9 +293,8 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
           <div className="relative">
              <input type="month" id="month-select" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className={`mt-1 block w-full px-3 py-2 border rounded-md ${isMonthLocked ? 'border-red-300 bg-red-50 text-red-900 font-semibold' : 'border-gray-300'}`}/>
              {isMonthLocked && (
-                 <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center text-red-600 pointer-events-none">
-                     <LockClosedIcon className="h-5 w-5 mr-1"/>
-                     <span className="text-xs font-bold">Đã chốt</span>
+                 <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center text-red-600 pointer-events-none" title="Tháng này đã chốt sổ">
+                     <LockClosedIcon className="h-5 w-5"/>
                  </div>
              )}
           </div>
@@ -331,6 +321,20 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
           </select>
         </div>
       </div>
+
+      {/* LOCK BUTTON AREA (New Location) */}
+      {isManager && !isMonthLocked && !loadingPayouts && calculatedForecastData.length > 0 && (
+         <div className="flex justify-end mb-6">
+             <button 
+                onClick={handleLockCommission} 
+                disabled={isProcessingLock}
+                className="flex items-center gap-2 bg-red-600 text-white font-bold py-2 px-6 rounded-lg shadow-md hover:bg-red-700 transition duration-300 disabled:bg-gray-400"
+             >
+                {isProcessingLock ? <SpinnerIcon className="h-5 w-5"/> : <ShieldCheckIcon className="h-5 w-5" />}
+                <span>Chốt sổ tháng này</span>
+            </button>
+         </div>
+      )}
 
       {/* SUMMARY CARD */}
       <div className={`p-4 rounded-lg shadow-sm border mb-6 flex justify-between items-center ${isMonthLocked ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'}`}>
