@@ -129,9 +129,9 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, addProject }) => {
 
       {/* Control Bar: Search & Filters */}
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 mb-6">
-        <div className="flex flex-col xl:flex-row gap-4 justify-between xl:items-center">
-            {/* Search - Chiếm 100% trên màn hình nhỏ, tối đa 400px trên màn hình lớn */}
-            <div className="relative w-full xl:max-w-md">
+        <div className="flex flex-col gap-4">
+            {/* Row 1: Search - Full Width */}
+            <div className="relative w-full">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <SearchIcon className="h-5 w-5 text-gray-400" />
                 </div>
@@ -144,11 +144,11 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, addProject }) => {
                 />
             </div>
 
-            {/* Filters Group - Dùng flex-wrap để tự động xuống dòng */}
-            <div className="flex flex-wrap gap-3 items-center w-full xl:w-auto xl:justify-end">
+            {/* Row 2: Filters - Flex Wrap */}
+            <div className="flex flex-wrap gap-3 items-center">
                 
                 {/* Leader Filter */}
-                <div className="flex items-center gap-2 w-full sm:w-auto min-w-[150px]">
+                <div className="flex items-center gap-2 w-full sm:w-auto">
                     <UserIcon className="h-5 w-5 text-gray-500 hidden sm:block flex-shrink-0" />
                     <select
                         value={leaderFilter}
@@ -165,7 +165,7 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, addProject }) => {
                 </div>
 
                 {/* Status Filter */}
-                <div className="flex items-center gap-2 w-full sm:w-auto min-w-[150px]">
+                <div className="flex items-center gap-2 w-full sm:w-auto">
                     <FilterIcon className="h-5 w-5 text-gray-500 hidden sm:block flex-shrink-0" />
                     <select
                         value={statusFilter}
@@ -180,7 +180,7 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, addProject }) => {
                 </div>
 
                 {/* Debt Filter */}
-                <div className="flex items-center gap-2 w-full sm:w-auto min-w-[150px]">
+                <div className="flex items-center gap-2 w-full sm:w-auto">
                     <select
                         value={debtFilter}
                         onChange={(e) => setDebtFilter(e.target.value as DebtFilterType)}
@@ -192,7 +192,7 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, addProject }) => {
                 </div>
 
                 {/* Sort */}
-                <div className="flex items-center gap-2 w-full sm:w-auto min-w-[180px]">
+                <div className="flex items-center gap-2 w-full sm:w-auto ml-auto sm:ml-0 md:ml-auto lg:ml-0">
                     <span className="text-sm text-gray-500 whitespace-nowrap hidden lg:inline">Sắp xếp:</span>
                     <select 
                         id="sort" 
