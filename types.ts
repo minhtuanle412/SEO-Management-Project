@@ -51,6 +51,7 @@ export interface MonthlyProgress {
   month: number;
   paymentStatus: PaymentStatus;
   paymentProofUrl?: string;
+  paymentDate?: string; // YYYY-MM-DD [NEW]
   installmentId?: string;
 }
 
@@ -60,6 +61,7 @@ export interface PaymentInstallment {
   paymentPercentage: number;
   status: PaymentStatus;
   paymentProofUrl?: string;
+  paymentDate?: string; // YYYY-MM-DD [NEW]
 }
 
 // --- NEW TYPES FOR COMMISSION MODULE ---

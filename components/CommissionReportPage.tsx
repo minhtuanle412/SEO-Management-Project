@@ -30,14 +30,16 @@ interface CalculatedRow {
   kpiPercentage: number;
   reportStatus: ReportStatus;
   paymentStatus: PaymentStatus;
+  paymentDate?: string;
   isEligible: boolean;
+  isBackPay: boolean; // NEW: True if paid late
   assignments: {
     staffId: string;
     staffName: string;
     department: string;
     position: string;
     commissionAmount: number;
-    effortPercentage: number; // Added effort %
+    effortPercentage: number;
   }[];
 }
 
@@ -89,30 +91,51 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
 
   // Logic 1: Tính toán "Dự kiến" (Khi chưa chốt)
   const calculatedForecastData = useMemo<CalculatedRow[]>(() => {
-    // Nếu đã chốt, không cần tính toán dự kiến làm gì cho nặng máy (trừ khi muốn so sánh, nhưng ở đây ta ẩn đi)
     if (isMonthLocked) return []; 
 
     const data: CalculatedRow[] = [];
+    const selectedMonthDate = new Date(selectedMonth + "-01"); // First day of selected month
+    const nextMonthStr = format(new Date(selectedMonthDate.getFullYear(), selectedMonthDate.getMonth() + 1, 1), 'yyyy-MM');
 
     projects.forEach(project => {
       const monthlyRevenue = project.durationMonths > 0 ? Math.round(project.totalBudget / project.durationMonths) : 0;
       
       project.kpiEntries.forEach(kpi => {
-        if (kpi.actualMonth.substring(0, 7) !== selectedMonth) {
-            return; 
-        }
+        // --- LOGIC GỐC: Tìm các tháng hợp đồng của tháng đang chọn ---
+        const isCurrentMonthContract = kpi.actualMonth.substring(0, 7) === selectedMonth;
         
-        const monthBreakdown = project.monthlyBreakdown.find(m => m.month === kpi.contractMonth);
+        // --- LOGIC TRUY THU (Back-pay) ---
+        // Điều kiện truy thu: 
+        // 1. KPI thuộc về quá khứ (Month < Selected Month)
+        // 2. Đã hoàn thành (KPI OK, Report OK)
+        // 3. Đã thanh toán (Paid)
+        // 4. VÀ Ngày thanh toán nằm trong tháng hiện tại (Selected Month)
+        
         let paymentStatus = PaymentStatus.Unpaid;
+        let paymentDate: string | undefined = undefined;
+        const monthBreakdown = project.monthlyBreakdown.find(m => m.month === kpi.contractMonth);
+
         if (monthBreakdown) {
             if (project.paymentType === PaymentType.Monthly) {
                 paymentStatus = monthBreakdown.paymentStatus;
+                paymentDate = monthBreakdown.paymentDate;
             } else if (project.paymentType === PaymentType.Milestone && monthBreakdown.installmentId) {
                 const installment = project.installments.find(i => i.id === monthBreakdown.installmentId);
                 paymentStatus = installment?.status || PaymentStatus.Unpaid;
+                paymentDate = installment?.paymentDate;
             }
         }
         
+        const isPaidInSelectedMonth = paymentDate && paymentDate.substring(0, 7) === selectedMonth;
+        const isPastContract = kpi.actualMonth.substring(0, 7) < selectedMonth;
+
+        const isBackPay = isPastContract && paymentStatus === PaymentStatus.Paid && isPaidInSelectedMonth;
+
+        // Chỉ xử lý nếu là tháng hiện tại HOẶC là truy thu
+        if (!isCurrentMonthContract && !isBackPay) {
+            return;
+        }
+
         const isEligible = kpi.kpiPercentage >= 75 && kpi.reportStatus === ReportStatus.Sent && paymentStatus === PaymentStatus.Paid;
         
         const assignments = project.assignments.map(assignment => {
@@ -144,19 +167,24 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
             kpiPercentage: kpi.kpiPercentage,
             reportStatus: kpi.reportStatus,
             paymentStatus,
+            paymentDate,
             isEligible,
+            isBackPay: !!isBackPay, // Mark as backpay
             assignments,
         });
       });
     });
-    return data.sort((a,b) => a.projectName.localeCompare(b.projectName) || a.contractMonth - b.contractMonth);
+    return data.sort((a,b) => {
+        // Sort: Current month first, then Backpay. Within groups by name.
+        if (a.isBackPay !== b.isBackPay) return a.isBackPay ? 1 : -1;
+        return a.projectName.localeCompare(b.projectName) || a.contractMonth - b.contractMonth;
+    });
   }, [projects, selectedMonth, commissionConfigMap, isMonthLocked]);
 
   // Logic 2: Dữ liệu "Lịch sử" (Khi đã chốt)
   const snapshotData = useMemo<CalculatedRow[]>(() => {
     if (!isMonthLocked) return [];
 
-    // Group payouts by Project ID to reconstruct the rows
     const groupedPayouts = new Map<string, CommissionPayout[]>();
     payouts.forEach(p => {
         const key = p.project_id;
@@ -166,21 +194,14 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
 
     const data: CalculatedRow[] = [];
     
-    // Duyệt qua từng dự án có trong snapshot
     groupedPayouts.forEach((projectPayouts, projectId) => {
         const project = projects.find(p => p.id === projectId);
-        if (!project) return; // Dự án đã bị xóa? Vẫn có thể hiển thị nếu muốn, nhưng ở đây skip cho an toàn.
+        if (!project) return; 
 
-        // Tìm KPI Entry tương ứng với tháng snapshot này để lấy thông tin KPI/Status
-        // (Lưu ý: Thông tin này có thể thay đổi, nhưng số tiền hoa hồng thì đã chốt cứng)
-        const kpiEntry = project.kpiEntries.find(k => k.actualMonth.substring(0, 7) === selectedMonth);
-        
-        // Giá trị mặc định nếu không tìm thấy KPI (trường hợp hiếm)
-        const kpiPercentage = kpiEntry?.kpiPercentage || 0;
-        const reportStatus = kpiEntry?.reportStatus || ReportStatus.NotSent;
-        const contractMonth = kpiEntry?.contractMonth || 0;
-        
-        // Reconstruct assignments from payout history
+        // NOTE: Trong snapshot không lưu thông tin "Đây là truy thu".
+        // Tuy nhiên, ta có thể đoán nếu KPI month khác Selected Month.
+        // Tạm thời hiển thị tất cả dưới dạng "Đã chốt" chung.
+
         const assignments = projectPayouts.map(p => ({
             staffId: p.staff_id,
             staffName: p.nhan_su?.ho_ten || 'Unknown',
@@ -194,13 +215,14 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
             projectId: project.id,
             projectName: project.name,
             client: project.client,
-            contractMonth: contractMonth,
+            contractMonth: 0, // Placeholder
             actualMonth: selectedMonth + "-01", // Fake date
-            monthlyRevenue: 0, // Không quan trọng ở view lịch sử vì tiền đã chốt
-            kpiPercentage,
-            reportStatus,
-            paymentStatus: PaymentStatus.Paid, // Giả định là đã trả mới có hoa hồng
-            isEligible: true, // Đã chốt nghĩa là hợp lệ
+            monthlyRevenue: 0,
+            kpiPercentage: 0, // Placeholder
+            reportStatus: ReportStatus.Sent,
+            paymentStatus: PaymentStatus.Paid,
+            isEligible: true,
+            isBackPay: false,
             assignments
         });
     });
@@ -240,17 +262,15 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
     if (!isManager) return;
     const confirmMessage = `CẢNH BÁO: Bạn đang thực hiện chốt sổ hoa hồng tháng ${selectedMonth}.
     \n- Dữ liệu sẽ được lưu cứng và KHÔNG THỂ thay đổi sau này.
-    \n- Các thay đổi nhân sự sau thời điểm này sẽ KHÔNG ảnh hưởng đến báo cáo tháng này nữa.
+    \n- Bao gồm cả các khoản Truy thu (nếu có).
     \nBạn có chắc chắn muốn tiếp tục?`;
 
     if (!window.confirm(confirmMessage)) return;
 
     setIsProcessingLock(true);
     try {
-        // 1. Chuẩn bị dữ liệu để insert
         const payoutsToInsert: any[] = [];
         
-        // Duyệt qua TOÀN BỘ calculatedForecastData (không phải filteredData, để chốt toàn bộ)
         calculatedForecastData.forEach(row => {
             row.assignments.forEach(assign => {
                 if (assign.commissionAmount > 0) {
@@ -259,7 +279,7 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
                         staff_id: assign.staffId,
                         amount: assign.commissionAmount,
                         month: selectedMonth,
-                        effort_percentage: assign.effortPercentage // Store effort at lock time
+                        effort_percentage: assign.effortPercentage
                     });
                 }
             });
@@ -270,13 +290,10 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
             return;
         }
 
-        // 2. Insert vào DB
         const { error } = await supabase.from('commission_payouts').insert(payoutsToInsert);
         if (error) throw error;
 
         addToast(`Đã chốt sổ thành công ${payoutsToInsert.length} bản ghi hoa hồng!`, 'success');
-        
-        // 3. Refresh lại view (Lúc này fetchPayouts sẽ trả về dữ liệu -> View chuyển sang Snapshot Mode)
         await fetchPayouts();
 
     } catch (err: any) {
@@ -292,7 +309,6 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
     <div className="container mx-auto">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-dark">Hoa hồng theo Dự án</h1>
-        {/* Button removed from here */}
       </div>
       
       {/* FILTER BAR */}
@@ -373,12 +389,16 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
                 {filteredData.length > 0 ? filteredData.map(row => (
-                <tr key={`${row.projectId}-${row.contractMonth}`}>
+                <tr key={`${row.projectId}-${row.contractMonth}-${row.isBackPay ? 'back' : 'curr'}`} className={row.isBackPay ? "bg-orange-50" : ""}>
                     <td className="px-4 py-4 whitespace-nowrap">
-                    <p className="font-medium text-dark">{row.projectName}</p>
-                    <p className="text-sm text-gray-500">{row.client}</p>
+                        <p className="font-medium text-dark">{row.projectName}</p>
+                        <p className="text-sm text-gray-500">{row.client}</p>
+                        {row.isBackPay && <span className="inline-block mt-1 text-xs font-bold text-orange-600 bg-orange-100 px-2 py-0.5 rounded border border-orange-200">Truy thu / Thanh toán muộn</span>}
                     </td>
-                    <td className="px-4 py-4 whitespace-nowrap text-center font-medium">T{row.contractMonth}</td>
+                    <td className="px-4 py-4 whitespace-nowrap text-center font-medium">
+                        T{row.contractMonth}
+                        {row.isBackPay && <div className="text-xs text-gray-500 mt-1">Thực tế: {format(new Date(row.actualMonth), 'MM/yyyy')}</div>}
+                    </td>
                     <td className="px-4 py-4 whitespace-nowrap font-semibold text-blue-600">{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(row.monthlyRevenue)}</td>
                     <td className="px-4 py-4 whitespace-nowrap">
                          {isMonthLocked ? (
@@ -390,6 +410,7 @@ const CommissionReportPage: React.FC<CommissionReportPageProps> = ({ projects, s
                                 <span className={`px-2 py-0.5 text-xs rounded-full w-fit ${row.kpiPercentage >= 75 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>KPI: {row.kpiPercentage}%</span>
                                 <span className={`px-2 py-0.5 text-xs rounded-full w-fit ${row.reportStatus === ReportStatus.Sent ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>BC: {row.reportStatus === ReportStatus.Sent ? 'Đã gửi' : 'Chưa'}</span>
                                 <span className={`px-2 py-0.5 text-xs rounded-full w-fit ${row.paymentStatus === PaymentStatus.Paid ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>TT: {row.paymentStatus === PaymentStatus.Paid ? 'Đã TT' : 'Chưa'}</span>
+                                {row.paymentDate && <span className="text-xs text-gray-500 italic">Ngày TT: {format(new Date(row.paymentDate), 'dd/MM/yyyy')}</span>}
                                 <span className={`px-2 py-0.5 text-xs rounded-full w-fit font-bold ${row.isEligible ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-500'}`}>{row.isEligible ? 'Hợp lệ' : 'Không'}</span>
                             </div>
                          )}

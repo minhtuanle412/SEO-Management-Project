@@ -1,19 +1,81 @@
 
 import React, { useState, useRef, useMemo } from 'react';
 import { Project, PaymentStatus, PaymentType, MonthlyProgress, PaymentInstallment } from '../../types';
-import { PlusIcon, EyeIcon, UploadIcon, SpinnerIcon, XIcon } from '../Icons';
+import { PlusIcon, EyeIcon, UploadIcon, XIcon, CalendarIcon } from '../Icons';
 import { supabase } from '../../lib/supabaseClient';
 import { useToast } from '../../contexts/ToastContext';
 import { Link } from 'react-router-dom';
 import ImagePreviewModal from '../ImagePreviewModal';
 import Button from '../ui/Button';
+import { format } from 'date-fns';
 
 interface PaymentTabProps {
     project: Project;
-    updateMonthlyPayment: (monthId: string, proofUrl: string) => Promise<void>;
-    updateInstallmentPayment: (installmentId: string, proofUrl: string) => Promise<void>;
+    updateMonthlyPayment: (monthId: string, paymentDate: string, proofUrl?: string) => Promise<void>;
+    updateInstallmentPayment: (installmentId: string, paymentDate: string, proofUrl?: string) => Promise<void>;
     fetchProjects: () => Promise<void>;
 }
+
+const PaymentUpdateModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onConfirm: (date: string, file: File | null) => Promise<void>;
+    isProcessing: boolean;
+    title: string;
+}> = ({ isOpen, onClose, onConfirm, isProcessing, title }) => {
+    const [paymentDate, setPaymentDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+    const [file, setFile] = useState<File | null>(null);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        await onConfirm(paymentDate, file);
+    };
+
+    if (!isOpen) return null;
+
+    return (
+         <div className="fixed inset-0 bg-black bg-opacity-50 z-[70] flex justify-center items-center p-4">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+                <div className="flex justify-between items-center p-4 border-b">
+                    <h3 className="text-lg font-bold text-dark">{title}</h3>
+                    <button onClick={onClose} disabled={isProcessing} className="text-gray-400 hover:text-gray-600">
+                        <XIcon className="h-6 w-6" />
+                    </button>
+                </div>
+                <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Ngày thanh toán</label>
+                        <input 
+                            type="date" 
+                            required 
+                            value={paymentDate} 
+                            onChange={(e) => setPaymentDate(e.target.value)}
+                            className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-primary focus:border-primary sm:text-sm"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Chọn ngày khách hàng thực tế chuyển khoản.</p>
+                    </div>
+                    
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Hình ảnh chứng từ (Tùy chọn)</label>
+                        <input 
+                            type="file" 
+                            accept="image/*"
+                            onChange={(e) => setFile(e.target.files?.[0] || null)}
+                            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Có thể bỏ qua nếu nhập liệu nhanh.</p>
+                    </div>
+
+                    <div className="flex justify-end pt-4 gap-2">
+                        <Button variant="secondary" type="button" onClick={onClose} disabled={isProcessing}>Hủy</Button>
+                        <Button type="submit" isLoading={isProcessing}>Xác nhận thanh toán</Button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
 
 const ManageInstallmentsModal: React.FC<{isOpen: boolean; onClose: () => void; project: Project; fetchProjects: () => void}> = ({ isOpen, onClose, project, fetchProjects }) => {
     const [name, setName] = useState('');
@@ -155,86 +217,64 @@ const ManageInstallmentsModal: React.FC<{isOpen: boolean; onClose: () => void; p
 
 const PaymentTab: React.FC<PaymentTabProps> = ({ project, updateMonthlyPayment, updateInstallmentPayment, fetchProjects }) => {
     const [updatingItemId, setUpdatingItemId] = useState<string | null>(null);
-    const [selectedItem, setSelectedItem] = useState<{ id: string; type: 'month' | 'installment' } | null>(null);
-    const [uploadError, setUploadError] = useState<React.ReactNode | null>(null);
+    const [selectedItem, setSelectedItem] = useState<{ id: string; type: 'month' | 'installment'; name: string } | null>(null);
     const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
     const { addToast } = useToast();
     const [isManageModalOpen, setIsManageModalOpen] = useState(false);
 
+    // Open Modal instead of File Input directly
     const handleInitiateMonthUpload = (month: MonthlyProgress) => {
         if (month.paymentStatus === PaymentStatus.Unpaid) {
-            setSelectedItem({ id: month.id, type: 'month' });
-            setUploadError(null); 
-            fileInputRef.current?.click();
+            setSelectedItem({ id: month.id, type: 'month', name: `Tháng ${month.month}` });
         }
     };
     
     const handleInitiateInstallmentUpload = (installment: PaymentInstallment) => {
         if (installment.status === PaymentStatus.Unpaid) {
-            setSelectedItem({ id: installment.id, type: 'installment' });
-            setUploadError(null); 
-            fileInputRef.current?.click();
+            setSelectedItem({ id: installment.id, type: 'installment', name: installment.name });
         }
     };
 
-    const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (!file || !selectedItem) return;
-
-        const acceptedImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-        if (!acceptedImageTypes.includes(file.type)) {
-            addToast('Vui lòng chọn một file hình ảnh (JPEG, PNG, GIF, WEBP).', 'error');
-            if (fileInputRef.current) fileInputRef.current.value = "";
-            return;
-        }
-
+    const handleConfirmPayment = async (paymentDate: string, file: File | null) => {
+        if (!selectedItem) return;
         setUpdatingItemId(selectedItem.id);
-        setUploadError(null);
 
         try {
-            const fileExtension = file.name.split('.').pop();
-            const subFolder = selectedItem.type === 'installment' ? 'installments' : 'monthly';
-            const filePath = `${project.id}/${subFolder}/${selectedItem.id}-${Date.now()}.${fileExtension}`;
+            let proofUrl: string | undefined = undefined;
 
-            const { error: uploadError } = await supabase.storage
-                .from('payment_proofs')
-                .upload(filePath, file);
+            if (file) {
+                const fileExtension = file.name.split('.').pop();
+                const subFolder = selectedItem.type === 'installment' ? 'installments' : 'monthly';
+                const filePath = `${project.id}/${subFolder}/${selectedItem.id}-${Date.now()}.${fileExtension}`;
 
-            if (uploadError) throw uploadError;
+                const { error: uploadError } = await supabase.storage
+                    .from('payment_proofs')
+                    .upload(filePath, file);
 
-            const { data: urlData } = supabase.storage
-                .from('payment_proofs')
-                .getPublicUrl(filePath);
-            
-            if (!urlData?.publicUrl) throw new Error('Không thể lấy URL công khai cho tệp đã tải lên.');
-            
+                if (uploadError) throw uploadError;
+
+                const { data: urlData } = supabase.storage
+                    .from('payment_proofs')
+                    .getPublicUrl(filePath);
+                
+                proofUrl = urlData?.publicUrl;
+            }
+
             if (selectedItem.type === 'installment') {
-                await updateInstallmentPayment(selectedItem.id, urlData.publicUrl);
+                await updateInstallmentPayment(selectedItem.id, paymentDate, proofUrl);
             } else {
-                await updateMonthlyPayment(selectedItem.id, urlData.publicUrl);
+                await updateMonthlyPayment(selectedItem.id, paymentDate, proofUrl);
             }
             
         } catch (error: any) {
-            console.error("Payment proof upload failed:", error);
-            const errorMessage = error.message ? error.message.toLowerCase() : '';
-            let userFriendlyError: React.ReactNode = (<span>Tải lên chứng từ thất bại: {error.message}. Vui lòng thử lại.</span>);
-
-            if (errorMessage.includes('bucket not found')) {
-                userFriendlyError = (<span><strong>Lỗi Cài Đặt:</strong> Bucket chưa được tạo. Xem hướng dẫn tại <Link to="/setup" className="underline">Cài đặt</Link>.</span>);
-            } else if (errorMessage.includes('security policy') || errorMessage.includes('rls')) {
-                 userFriendlyError = (<span><strong>Lỗi Quyền:</strong> Kiểm tra policy bucket. Xem hướng dẫn tại <Link to="/setup" className="underline">Cài đặt</Link>.</span>);
-            }
-            
-            setUploadError(userFriendlyError);
-            addToast('Tải lên thất bại. Vui lòng xem chi tiết lỗi.', 'error');
-
+            console.error("Payment update failed:", error);
+            addToast(`Lỗi cập nhật: ${error.message}`, 'error');
         } finally {
             setUpdatingItemId(null);
             setSelectedItem(null);
-            if (fileInputRef.current) fileInputRef.current.value = "";
         }
     };
+
 
     if (project.paymentType === PaymentType.Milestone) {
         const getAssignedMonths = (installmentId: string) => {
@@ -248,20 +288,12 @@ const PaymentTab: React.FC<PaymentTabProps> = ({ project, updateMonthlyPayment, 
         return (
             <>
                 <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                    <input type="file" ref={fileInputRef} onChange={handleFileChange} style={{ display: 'none' }} accept="image/png, image/jpeg, image/gif, image/webp" />
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-3">
                         <h2 className="text-xl font-bold text-dark">Các đợt thanh toán</h2>
                         <Button onClick={() => setIsManageModalOpen(true)} icon={<PlusIcon className="h-5 w-5" />}>
                             Quản lý các đợt
                         </Button>
                     </div>
-
-                    {uploadError && (
-                        <div className="bg-red-50 border-l-4 border-red-500 text-red-800 p-4 mb-6 rounded-r-lg" role="alert">
-                            <h3 className="font-bold text-lg mb-2">Không thể tải lên chứng từ</h3>
-                            <div className="text-sm">{uploadError}</div>
-                        </div>
-                    )}
                     
                     {project.installments.length > 0 ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
@@ -283,6 +315,13 @@ const PaymentTab: React.FC<PaymentTabProps> = ({ project, updateMonthlyPayment, 
 
                                             <p className="text-primary font-semibold text-xl my-2">{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(amount)}</p>
                                             
+                                            {isPaid && installment.paymentDate && (
+                                                <p className="text-xs text-gray-500 flex justify-center items-center gap-1">
+                                                    <CalendarIcon className="h-3 w-3" />
+                                                    {format(new Date(installment.paymentDate), 'dd/MM/yyyy')}
+                                                </p>
+                                            )}
+
                                             <p className="text-xs text-gray-500 mt-1 h-8">
                                                 {assignedMonthsText ? `Áp dụng: ${assignedMonthsText}` : 'Chưa gán tháng'}
                                             </p>
@@ -291,15 +330,15 @@ const PaymentTab: React.FC<PaymentTabProps> = ({ project, updateMonthlyPayment, 
                                         <div className="w-full mt-auto pt-3">
                                             {isUpdating ? (
                                                 <Button className="w-full" disabled isLoading>Đang xử lý...</Button>
-                                            ) : isPaid && installment.paymentProofUrl ? (
-                                                <Button variant="secondary" className="w-full bg-blue-100 text-blue-800 hover:bg-blue-200" icon={<EyeIcon className="h-5 w-5" />} onClick={() => setPreviewImageUrl(installment.paymentProofUrl!)}>
-                                                    Xem chứng từ
-                                                </Button>
-                                            ) : isPaid && !installment.paymentProofUrl ? (
-                                                <p className="text-sm text-gray-500">Đã TT (không có CT)</p>
+                                            ) : isPaid ? (
+                                                installment.paymentProofUrl ? (
+                                                     <Button variant="secondary" className="w-full bg-blue-100 text-blue-800 hover:bg-blue-200" icon={<EyeIcon className="h-5 w-5" />} onClick={() => setPreviewImageUrl(installment.paymentProofUrl!)}>
+                                                        Xem chứng từ
+                                                    </Button>
+                                                ) : <p className="text-sm text-gray-500 italic">Đã xác nhận nhanh</p>
                                             ) : (
                                                 <Button className="w-full" icon={<UploadIcon className="h-5 w-5" />} onClick={() => handleInitiateInstallmentUpload(installment)}>
-                                                    Đánh dấu Đã TT
+                                                    Cập nhật thanh toán
                                                 </Button>
                                             )}
                                         </div>
@@ -320,6 +359,13 @@ const PaymentTab: React.FC<PaymentTabProps> = ({ project, updateMonthlyPayment, 
                     project={project}
                     fetchProjects={fetchProjects}
                 />
+                 <PaymentUpdateModal
+                    isOpen={!!selectedItem}
+                    onClose={() => setSelectedItem(null)}
+                    onConfirm={handleConfirmPayment}
+                    isProcessing={!!updatingItemId}
+                    title={selectedItem?.name || 'Thanh toán'}
+                />
             </>
         )
     }
@@ -327,15 +373,7 @@ const PaymentTab: React.FC<PaymentTabProps> = ({ project, updateMonthlyPayment, 
     return (
         <>
             <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                <input type="file" ref={fileInputRef} onChange={handleFileChange} style={{ display: 'none' }} accept="image/png, image/jpeg, image/gif, image/webp" />
                 <h2 className="text-xl font-bold text-dark mb-4">Tình trạng thanh toán theo tháng</h2>
-
-                {uploadError && (
-                    <div className="bg-red-50 border-l-4 border-red-500 text-red-800 p-4 mb-6 rounded-r-lg" role="alert">
-                        <h3 className="font-bold text-lg mb-2">Không thể tải lên chứng từ</h3>
-                        <div className="text-sm">{uploadError}</div>
-                    </div>
-                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                     {project.monthlyBreakdown.sort((a,b) => a.month - b.month).map(month => {
@@ -352,20 +390,26 @@ const PaymentTab: React.FC<PaymentTabProps> = ({ project, updateMonthlyPayment, 
                                     <span className={`px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full ${isPaid ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                         {month.paymentStatus}
                                     </span>
+                                    {isPaid && month.paymentDate && (
+                                        <p className="text-xs text-gray-500 flex justify-center items-center gap-1 mt-2">
+                                            <CalendarIcon className="h-3 w-3" />
+                                            {format(new Date(month.paymentDate), 'dd/MM/yyyy')}
+                                        </p>
+                                    )}
                                 </div>
                                 
                                 <div className="w-full mt-auto pt-3">
                                     {isUpdating ? (
                                         <Button className="w-full" disabled isLoading>Đang xử lý...</Button>
-                                    ) : isPaid && hasProof ? (
-                                        <Button variant="secondary" className="w-full bg-blue-100 text-blue-800 hover:bg-blue-200" icon={<EyeIcon className="h-5 w-5" />} onClick={() => setPreviewImageUrl(month.paymentProofUrl!)}>
-                                            Xem chứng từ
-                                        </Button>
-                                    ) : isPaid && !hasProof ? (
-                                        <p className="text-sm text-gray-500">Đã TT (không có CT)</p>
+                                    ) : isPaid ? (
+                                         hasProof ? (
+                                            <Button variant="secondary" className="w-full bg-blue-100 text-blue-800 hover:bg-blue-200" icon={<EyeIcon className="h-5 w-5" />} onClick={() => setPreviewImageUrl(month.paymentProofUrl!)}>
+                                                Xem chứng từ
+                                            </Button>
+                                         ) : <p className="text-sm text-gray-500 italic">Đã xác nhận nhanh</p>
                                     ) : (
                                         <Button className="w-full" icon={<UploadIcon className="h-5 w-5" />} onClick={() => handleInitiateMonthUpload(month)}>
-                                            Đánh dấu Đã TT
+                                            Cập nhật thanh toán
                                         </Button>
                                     )}
                                 </div>
@@ -375,6 +419,13 @@ const PaymentTab: React.FC<PaymentTabProps> = ({ project, updateMonthlyPayment, 
                 </div>
             </div>
             <ImagePreviewModal isOpen={!!previewImageUrl} imageUrl={previewImageUrl} onClose={() => setPreviewImageUrl(null)} />
+            <PaymentUpdateModal
+                isOpen={!!selectedItem}
+                onClose={() => setSelectedItem(null)}
+                onConfirm={handleConfirmPayment}
+                isProcessing={!!updatingItemId}
+                title={selectedItem?.name || 'Thanh toán'}
+            />
         </>
     );
 };

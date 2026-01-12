@@ -35,6 +35,7 @@ const mapSupabaseMonthlyBreakdown = (item: any): MonthlyProgress => ({
   month: item.month,
   paymentStatus: item.payment_status,
   paymentProofUrl: item.payment_proof_url,
+  paymentDate: item.payment_date, // [FIX] Mapped
   installmentId: item.installment_id,
 });
 
@@ -44,6 +45,7 @@ const mapSupabasePaymentInstallment = (item: any): PaymentInstallment => ({
     paymentPercentage: item.payment_percentage,
     status: item.status,
     paymentProofUrl: item.payment_proof_url,
+    paymentDate: item.payment_date, // [FIX] Mapped
 });
 
 const mapSupabaseProjectAssignment = (item: any): ProjectAssignment => ({
@@ -51,7 +53,7 @@ const mapSupabaseProjectAssignment = (item: any): ProjectAssignment => ({
     project_id: item.project_id,
     nhan_su_id: item.nhan_su_id,
     nhan_su: item.nhan_su,
-    ty_le_phan_cong: item.ty_le_phan_cong, // [FIX] Ánh xạ trường này để UI nhận được dữ liệu mới
+    ty_le_phan_cong: item.ty_le_phan_cong, 
 });
 
 const mapSupabaseProject = (project: any): Project => ({
@@ -252,9 +254,6 @@ const AppContent: React.FC = () => {
   }, []);
 
   const fetchAllData = useCallback(async () => {
-    // Chỉ tải dữ liệu khi đã cấu hình Supabase và có user
-    // LƯU Ý QUAN TRỌNG: Dependency của useCallback này phải là user?.id thay vì user
-    // để tránh việc hàm này bị tạo lại mỗi khi object user thay đổi (do refresh token/switch tab)
     if (!isSupabaseConfigured || !user) {
         setLoading(false);
         return;
@@ -289,12 +288,10 @@ const AppContent: React.FC = () => {
              if (errorMessage.includes("does not exist")) {
                  setError(`Lỗi cơ sở dữ liệu: Một hoặc nhiều bảng (projects, nhan_su, etc.) không tồn tại. Vui lòng chạy các câu lệnh SQL trong Hướng dẫn Cài đặt.`);
              } else if (errorMessage.includes("violates row-level security policy")) {
-                 // Don't show full error screen for RLS, just maybe partial data or empty arrays for some
                  console.warn("RLS policy restricted some data");
              } else {
                  setError(`Không thể tải dữ liệu: ${errorMessage}`);
              }
-             // Even if error, set what we have
              setProjects(projectsRes.data?.map(mapSupabaseProject) || []);
              setStaff(staffRes.data as Staff[] || []);
              setCommissionConfigs(commissionConfigsRes.data as CommissionConfig[] || []);
@@ -318,7 +315,6 @@ const AppContent: React.FC = () => {
     } finally {
         setLoading(false);
     }
-    // Sử dụng user?.id thay vì user để tránh re-fetch khi object user thay đổi tham chiếu
   }, [isSupabaseConfigured, user?.id]); 
 
 
@@ -326,12 +322,8 @@ const AppContent: React.FC = () => {
     if (user) {
         fetchAllData();
     } else {
-        // Nếu không có user, đảm bảo loading dữ liệu (data loading) được tắt
-        // Điều này ngăn trường hợp authLoading=false (đã xác định là guest) nhưng loading=true (vẫn đang đợi dữ liệu)
         setLoading(false);
     }
-    // Dependency chỉ bao gồm fetchAllData (đã được memoize theo user.id) và user.id
-    // Điều này đảm bảo effect chỉ chạy lại khi ID người dùng thực sự thay đổi
   }, [fetchAllData, user?.id]);
 
  const addProject = useCallback(async (newProjectData: Omit<Project, 'id' | 'endDate' | 'monthlyBreakdown' | 'kpiEntries' | 'installments' | 'lookerStudioUrl' | 'assignments'>) => {
@@ -355,15 +347,7 @@ const AppContent: React.FC = () => {
         if (error || !newProject) {
             console.error('Error adding project:', error);
             const errorMessageStr = String(error?.message || 'Lỗi không xác định');
-            const errorDetailsStr = error?.details ? ` (${error.details})` : '';
-            let userFriendlyMessage = `Lỗi khi thêm dự án: ${errorMessageStr}${errorDetailsStr}`;
-            
-            if (errorMessageStr.toLowerCase().includes('security policy')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền thêm dự án.`;
-            } else if (errorMessageStr.includes("violates check constraint") && errorMessageStr.includes("total_budget_positive")) {
-                 userFriendlyMessage = `Lỗi dữ liệu: Tổng ngân sách phải là một số dương.`;
-            }
-            addToast(userFriendlyMessage, 'error');
+            addToast(`Lỗi khi thêm dự án: ${errorMessageStr}`, 'error');
             return;
         }
 
@@ -409,14 +393,7 @@ const addKpiEntry = useCallback(async (projectId: string, newEntryData: Omit<Kpi
 
         if (error || !newEntry) {
             console.error("Error adding KPI entry:", error);
-            const errorMessageStr = String(error?.message || 'Lỗi không xác định');
-            const errorDetailsStr = error?.details ? ` (${error.details})` : '';
-            let userFriendlyMessage = `Lỗi khi thêm mục KPI: ${errorMessageStr}${errorDetailsStr}`;
-
-            if (errorMessageStr.toLowerCase().includes('security policy')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền thêm KPI.`;
-            }
-            addToast(userFriendlyMessage, 'error');
+            addToast(`Lỗi khi thêm mục KPI: ${error.message}`, 'error');
             return;
         }
         addToast('Đã thêm mục KPI mới thành công!', 'success');
@@ -443,14 +420,7 @@ const updateKpiEntry = useCallback(async (kpiEntryId: string, updates: Partial<P
 
         if (error) {
             console.error("Error updating KPI entry:", error);
-            const errorMessageStr = String(error.message || 'Lỗi không xác định.');
-            const errorDetailsStr = error.details ? ` (${error.details})` : '';
-            let userFriendlyMessage = `Lỗi khi cập nhật báo cáo: ${errorMessageStr}${errorDetailsStr}`;
-
-            if (errorMessageStr.toLowerCase().includes('security policy') || errorMessageStr.toLowerCase().includes('permission denied')) {
-                 userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền cập nhật KPI.`;
-            }
-            addToast(userFriendlyMessage, 'error');
+            addToast(`Lỗi khi cập nhật báo cáo: ${error.message}`, 'error');
             return;
         }
 
@@ -464,29 +434,25 @@ const updateKpiEntry = useCallback(async (kpiEntryId: string, updates: Partial<P
 }, [fetchAllData, isSupabaseConfigured, addToast]);
 
 
-const updateMonthlyPayment = useCallback(async (monthId: string, proofUrl: string) => {
+const updateMonthlyPayment = useCallback(async (monthId: string, paymentDate: string, proofUrl?: string) => {
     if (!isSupabaseConfigured) return;
     try {
+        const updates: any = { 
+            payment_status: PaymentStatus.Paid,
+            payment_date: paymentDate
+        };
+        if (proofUrl) {
+            updates.payment_proof_url = proofUrl;
+        }
+
         const { error } = await supabase
             .from('monthly_breakdown')
-            .update({ 
-                payment_status: PaymentStatus.Paid,
-                payment_proof_url: proofUrl,
-            })
+            .update(updates)
             .match({ id: monthId });
 
         if (error) {
             console.error("Error updating payment status:", error);
-            const errorMessageStr = String(error.message || 'Lỗi không xác định.');
-            const errorDetailsStr = error.details ? ` (${error.details})` : '';
-            let userFriendlyMessage = `Lỗi khi cập nhật thanh toán: ${errorMessageStr}${errorDetailsStr}`;
-
-            if (errorMessageStr.toLowerCase().includes('security policy') || errorMessageStr.toLowerCase().includes('permission denied')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền cập nhật thanh toán.`;
-            } else if (errorMessageStr.toLowerCase().includes("could not find the 'payment_proof_url' column")) {
-                userFriendlyMessage = `Lỗi Cấu trúc Cơ sở dữ liệu: Không tìm thấy cột 'payment_proof_url'.`;
-            }
-            addToast(userFriendlyMessage, 'error');
+            addToast(`Lỗi khi cập nhật thanh toán: ${error.message}`, 'error');
             return;
         }
         addToast('Trạng thái thanh toán đã được cập nhật thành công!', 'success');
@@ -498,27 +464,25 @@ const updateMonthlyPayment = useCallback(async (monthId: string, proofUrl: strin
     }
 }, [fetchAllData, isSupabaseConfigured, addToast]);
 
-const updateInstallmentPayment = useCallback(async (installmentId: string, proofUrl: string) => {
+const updateInstallmentPayment = useCallback(async (installmentId: string, paymentDate: string, proofUrl?: string) => {
     if (!isSupabaseConfigured) return;
     try {
+        const updates: any = { 
+            status: PaymentStatus.Paid,
+            payment_date: paymentDate
+        };
+        if (proofUrl) {
+            updates.payment_proof_url = proofUrl;
+        }
+
         const { error } = await supabase
             .from('payment_installments')
-            .update({ 
-                status: PaymentStatus.Paid,
-                payment_proof_url: proofUrl,
-            })
+            .update(updates)
             .match({ id: installmentId });
 
         if (error) {
             console.error("Error updating installment payment status:", error);
-            const errorMessageStr = String(error.message || 'Lỗi không xác định.');
-            const errorDetailsStr = error.details ? ` (${error.details})` : '';
-            let userFriendlyMessage = `Lỗi khi cập nhật thanh toán đợt: ${errorMessageStr}${errorDetailsStr}`;
-
-            if (errorMessageStr.toLowerCase().includes('security policy') || errorMessageStr.toLowerCase().includes('permission denied')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền cập nhật thanh toán.`;
-            }
-            addToast(userFriendlyMessage, 'error');
+            addToast(`Lỗi khi cập nhật thanh toán đợt: ${error.message}`, 'error');
             return;
         }
         addToast('Trạng thái thanh toán đợt đã được cập nhật thành công!', 'success');
@@ -541,14 +505,7 @@ const updateKpiConfirmation = useCallback(async (kpiEntryId: string, confirmatio
 
         if (error) {
             console.error("Error updating KPI confirmation:", error);
-            const errorMessageStr = String(error.message || 'Lỗi không xác định.');
-            const errorDetailsStr = error.details ? ` (${error.details})` : '';
-            let userFriendlyMessage = `Lỗi khi cập nhật xác nhận: ${errorMessageStr}${errorDetailsStr}`;
-
-            if (errorMessageStr.toLowerCase().includes('security policy')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền cập nhật xác nhận.`;
-            }
-            addToast(userFriendlyMessage, 'error');
+            addToast(`Lỗi khi cập nhật xác nhận: ${error.message}`, 'error');
             return;
         }
 
@@ -571,14 +528,7 @@ const updateProjectName = useCallback(async (projectId: string, newName: string)
 
         if (error) {
             console.error("Error updating project name:", error);
-            const errorMessageStr = String(error.message || 'Lỗi không xác định.');
-            const errorDetailsStr = error.details ? ` (${error.details})` : '';
-            let userFriendlyMessage = `Lỗi khi cập nhật tên dự án: ${errorMessageStr}${errorDetailsStr}`;
-
-            if (errorMessageStr.toLowerCase().includes('security policy')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền cập nhật tên dự án.`;
-            }
-            addToast(userFriendlyMessage, 'error');
+            addToast(`Lỗi khi cập nhật tên dự án: ${error.message}`, 'error');
             return;
         }
 
@@ -601,14 +551,7 @@ const updateLookerStudioUrl = useCallback(async (projectId: string, url: string 
 
         if (error) {
             console.error("Error updating Looker Studio URL:", error);
-            const errorMessageStr = String(error.message || 'Lỗi không xác định.');
-            const errorDetailsStr = error.details ? ` (${error.details})` : '';
-            let userFriendlyMessage = `Lỗi khi cập nhật URL báo cáo: ${errorMessageStr}${errorDetailsStr}`;
-
-            if (errorMessageStr.toLowerCase().includes('security policy')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền cập nhật URL.`;
-            }
-            addToast(userFriendlyMessage, 'error');
+            addToast(`Lỗi khi cập nhật URL báo cáo: ${error.message}`, 'error');
             return;
         }
 
@@ -634,14 +577,7 @@ const updateKpiCommissionStatus = useCallback(async (kpiEntryId: string) => {
 
         if (error) {
             console.error("Error updating commission status:", error);
-            const errorMessageStr = String(error.message || 'Lỗi không xác định.');
-            const errorDetailsStr = error.details ? ` (${error.details})` : '';
-            let userFriendlyMessage = `Lỗi khi cập nhật hoa hồng: ${errorMessageStr}${errorDetailsStr}`;
-
-            if (errorMessageStr.toLowerCase().includes('security policy')) {
-                userFriendlyMessage = `Lỗi quyền truy cập: Bạn không có quyền cập nhật hoa hồng.`;
-            }
-            addToast(userFriendlyMessage, 'error');
+            addToast(`Lỗi khi cập nhật hoa hồng: ${error.message}`, 'error');
             return;
         }
         addToast('Trạng thái hoa hồng đã được cập nhật thành công!', 'success');

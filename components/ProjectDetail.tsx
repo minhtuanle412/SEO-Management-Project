@@ -20,8 +20,8 @@ interface ProjectDetailProps {
   projects: Project[];
   allStaff: Staff[];
   addKpiEntry: (projectId: string, newEntryData: Omit<KpiEntry, 'id' | 'commissionStatus' | 'commissionPaidDate'>) => Promise<void>;
-  updateMonthlyPayment: (monthId: string, proofUrl: string) => Promise<void>;
-  updateInstallmentPayment: (installmentId: string, proofUrl: string) => Promise<void>;
+  updateMonthlyPayment: (monthId: string, paymentDate: string, proofUrl?: string) => Promise<void>;
+  updateInstallmentPayment: (installmentId: string, paymentDate: string, proofUrl?: string) => Promise<void>;
   updateKpiEntry: (kpiEntryId: string, updates: Partial<Pick<KpiEntry, 'reportStatus' | 'reportSentDate'>>) => Promise<void>;
   updateKpiConfirmation: (kpiEntryId: string, confirmationUrl: string) => Promise<void>;
   updateProjectName: (projectId: string, newName: string) => Promise<void>;
@@ -183,7 +183,7 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projects, allStaff, addKp
     setIsEditingName(false);
   };
 
-  const TABS_ORDER = ['kpi', 'assignment', 'report', 'payment', 'commission', 'performance'];
+  const TABS_ORDER = ['kpi', 'report', 'payment', 'commission', 'assignment'];
   
   const TABS = {
       kpi: { label: 'Quản lý KPI', component: <KpiTab project={project} addKpiEntry={addKpiEntry} /> },
