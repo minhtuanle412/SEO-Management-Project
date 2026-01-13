@@ -1,10 +1,14 @@
 
-import React, { useState, useMemo } from 'react';
-import { Project, PaymentStatus, PaymentType, Staff } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Project, PaymentStatus, PaymentType, Staff, DeletionRequest } from '../types';
 import ProjectCard from './ProjectCard';
 import AddProjectModal from './AddProjectModal';
-import { PlusIcon, SearchIcon, FilterIcon, UserIcon } from './Icons';
-import { addMonths, isPast, differenceInDays } from 'date-fns';
+import { PlusIcon, SearchIcon, FilterIcon, UserIcon, XCircleIcon, CheckCircleIcon } from './Icons';
+import { addMonths, isPast, differenceInDays, format } from 'date-fns';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabaseClient';
+import { useToast } from '../contexts/ToastContext';
+import Button from './ui/Button';
 
 interface DashboardProps {
   projects: Project[];
@@ -22,6 +26,67 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, addProject }) => {
   const [statusFilter, setStatusFilter] = useState<StatusFilterType>('all');
   const [debtFilter, setDebtFilter] = useState<DebtFilterType>('all');
   const [leaderFilter, setLeaderFilter] = useState<string>('all');
+  
+  // Deletion Request State
+  const [deletionRequests, setDeletionRequests] = useState<DeletionRequest[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(false);
+  const { isManager, user } = useAuth();
+  const { addToast } = useToast();
+
+  const fetchDeletionRequests = async () => {
+      if (!isManager) return;
+      setLoadingRequests(true);
+      try {
+          const { data, error } = await supabase
+            .from('project_deletion_requests')
+            .select(`
+                *,
+                project:projects(name, client),
+                requester_profile:profiles(full_name, email)
+            `);
+          if (error) throw error;
+          setDeletionRequests(data as any); // Cast because of joins
+      } catch (err) {
+          console.error("Error fetching deletion requests", err);
+      } finally {
+          setLoadingRequests(false);
+      }
+  };
+
+  useEffect(() => {
+      if (isManager) {
+          fetchDeletionRequests();
+      }
+  }, [isManager]);
+
+  const handleApproveDelete = async (requestId: string, projectId: string) => {
+      if (!window.confirm("Hành động này sẽ XÓA VĨNH VIỄN dự án và tất cả dữ liệu liên quan. Bạn có chắc chắn không?")) return;
+      try {
+          // Deleting the project will cascade delete the request due to FK constraints
+          const { error } = await supabase.from('projects').delete().match({ id: projectId });
+          if (error) throw error;
+          
+          addToast('Đã xóa dự án thành công.', 'success');
+          // Update local state
+          setDeletionRequests(prev => prev.filter(r => r.id !== requestId));
+          // Refresh page or trigger a parent refresh would be ideal, but for now we rely on auto-refetch or simple UI update
+          window.location.reload(); 
+      } catch (err: any) {
+          addToast(`Lỗi xóa dự án: ${err.message}`, 'error');
+      }
+  };
+
+  const handleRejectDelete = async (requestId: string) => {
+      try {
+          const { error } = await supabase.from('project_deletion_requests').delete().match({ id: requestId });
+          if (error) throw error;
+          
+          addToast('Đã từ chối yêu cầu xóa.', 'success');
+          setDeletionRequests(prev => prev.filter(r => r.id !== requestId));
+      } catch (err: any) {
+          addToast(`Lỗi: ${err.message}`, 'error');
+      }
+  };
 
   // Lấy danh sách các Leader duy nhất từ dữ liệu phân công của các dự án
   const availableLeaders = useMemo(() => {
@@ -115,6 +180,61 @@ const Dashboard: React.FC<DashboardProps> = ({ projects, addProject }) => {
 
   return (
     <div className="container mx-auto">
+      {/* DELETION REQUESTS SECTION (Managers Only) */}
+      {isManager && deletionRequests.length > 0 && (
+          <div className="bg-red-50 border-2 border-red-200 rounded-xl p-6 mb-8 shadow-sm">
+              <div className="flex items-center gap-3 mb-4">
+                  <div className="bg-red-100 p-2 rounded-full">
+                      <XCircleIcon className="h-6 w-6 text-red-600" />
+                  </div>
+                  <h2 className="text-xl font-bold text-red-800">Yêu cầu xóa dự án cần phê duyệt ({deletionRequests.length})</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {deletionRequests.map(req => {
+                      const isMyRequest = req.requested_by === user?.id;
+                      return (
+                          <div key={req.id} className="bg-white p-4 rounded-lg shadow border border-red-100 flex flex-col">
+                              <div className="mb-3">
+                                  <h3 className="font-bold text-gray-800 text-lg">{req.project?.name || 'Tên dự án ẩn'}</h3>
+                                  <p className="text-sm text-gray-600">{req.project?.client}</p>
+                              </div>
+                              <div className="text-xs text-gray-500 mb-4 bg-gray-50 p-2 rounded">
+                                  <p><strong>Người yêu cầu:</strong> {req.requester_profile?.full_name || req.requester_profile?.email}</p>
+                                  <p><strong>Ngày:</strong> {format(new Date(req.created_at), 'dd/MM/yyyy HH:mm')}</p>
+                              </div>
+                              <div className="mt-auto pt-2 border-t flex gap-2">
+                                  {isMyRequest ? (
+                                      <div className="w-full text-center text-sm font-semibold text-orange-600 bg-orange-50 py-2 rounded">
+                                          Đang chờ Manager khác duyệt
+                                      </div>
+                                  ) : (
+                                      <>
+                                          <Button 
+                                            variant="danger" 
+                                            size="sm" 
+                                            className="flex-1" 
+                                            onClick={() => handleApproveDelete(req.id, req.project_id)}
+                                          >
+                                              Duyệt Xóa
+                                          </Button>
+                                          <Button 
+                                            variant="secondary" 
+                                            size="sm" 
+                                            className="flex-1"
+                                            onClick={() => handleRejectDelete(req.id)}
+                                          >
+                                              Từ chối
+                                          </Button>
+                                      </>
+                                  )}
+                              </div>
+                          </div>
+                      );
+                  })}
+              </div>
+          </div>
+      )}
+
       {/* Header & Main Actions */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <h1 className="text-3xl font-bold text-dark">Danh sách dự án</h1>

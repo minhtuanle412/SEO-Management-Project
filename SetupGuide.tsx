@@ -137,7 +137,16 @@ CREATE TABLE IF NOT EXISTS public.commission_payouts (
 );
 ALTER TABLE public.commission_payouts ADD COLUMN IF NOT EXISTS effort_percentage INT DEFAULT 100;
 
--- 7. Auth & Profiles
+-- [NEW] 7. Bảng Yêu cầu Xóa Dự án
+CREATE TABLE IF NOT EXISTS public.project_deletion_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
+  requested_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(project_id)
+);
+
+-- 8. Auth & Profiles
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT,
@@ -162,10 +171,10 @@ CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXEC
 
 INSERT INTO public.profiles (id, email) SELECT id, email FROM auth.users ON CONFLICT (id) DO NOTHING;
 
--- 8. RLS Policies
+-- 9. RLS Policies
 DO $$
 DECLARE
-  tabs text[] := ARRAY['projects', 'payment_installments', 'monthly_breakdown', 'kpi_entries', 'nhan_su', 'phong_ban', 'chuc_vu', 'phan_cong_du_an', 'cau_hinh_hoa_hong', 'profiles', 'commission_payouts'];
+  tabs text[] := ARRAY['projects', 'payment_installments', 'monthly_breakdown', 'kpi_entries', 'nhan_su', 'phong_ban', 'chuc_vu', 'phan_cong_du_an', 'cau_hinh_hoa_hong', 'profiles', 'commission_payouts', 'project_deletion_requests'];
   t text;
 BEGIN
   FOREACH t IN ARRAY tabs LOOP
@@ -193,6 +202,9 @@ DROP POLICY IF EXISTS "Admin write config" ON public.cau_hinh_hoa_hong;
 -- Commission Payouts
 DROP POLICY IF EXISTS "Auth read payouts" ON public.commission_payouts;
 DROP POLICY IF EXISTS "Manager insert payouts" ON public.commission_payouts;
+
+-- Deletion Requests
+DROP POLICY IF EXISTS "Manager manage deletion requests" ON public.project_deletion_requests;
 
 -- Project Data
 DROP POLICY IF EXISTS "Auth access projects" ON public.projects;
@@ -229,6 +241,11 @@ CREATE POLICY "Auth read payouts" ON public.commission_payouts FOR SELECT TO aut
 CREATE POLICY "Manager insert payouts" ON public.commission_payouts FOR INSERT TO authenticated 
 WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'manager'));
 
+-- Policy cho Deletion Requests (Chỉ Admin/Manager)
+CREATE POLICY "Manager manage deletion requests" ON public.project_deletion_requests
+FOR ALL TO authenticated
+USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'manager'));
+
 -- Policy cho Dữ liệu Dự án
 CREATE POLICY "Auth access projects" ON public.projects FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Auth access installments" ON public.payment_installments FOR ALL TO authenticated USING (true) WITH CHECK (true);
@@ -248,7 +265,7 @@ COMMIT;
       <h1 className="text-4xl font-bold text-dark mb-4">Hướng dẫn Cài đặt & Cập nhật</h1>
       <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-6">
         <p className="text-yellow-700 font-bold">CẬP NHẬT DATABASE (Quan trọng)</p>
-        <p className="text-yellow-700">Đã cập nhật cấu trúc bảng để hỗ trợ <strong>ngày thanh toán chính xác</strong>. Vui lòng copy và chạy lại script bên dưới trong Supabase SQL Editor.</p>
+        <p className="text-yellow-700">Đã thêm bảng quản lý <strong>yêu cầu xóa dự án</strong>. Vui lòng copy và chạy lại script bên dưới trong Supabase SQL Editor.</p>
       </div>
       <p className="text-gray-600 mb-8">
         Trang này cung cấp các mã lệnh SQL cần thiết để thiết lập cơ sở dữ liệu cho ứng dụng.

@@ -541,29 +541,6 @@ const updateProjectName = useCallback(async (projectId: string, newName: string)
     }
 }, [fetchAllData, isSupabaseConfigured, addToast]);
 
-const updateLookerStudioUrl = useCallback(async (projectId: string, url: string | null) => {
-    if (!isSupabaseConfigured) return;
-    try {
-        const { error } = await supabase
-            .from('projects')
-            .update({ looker_studio_url: url })
-            .match({ id: projectId });
-
-        if (error) {
-            console.error("Error updating Looker Studio URL:", error);
-            addToast(`Lỗi khi cập nhật URL báo cáo: ${error.message}`, 'error');
-            return;
-        }
-
-        addToast('URL báo cáo hiệu suất đã được cập nhật thành công!', 'success');
-        await fetchAllData();
-    } catch (err: unknown) {
-        console.error('An unexpected error occurred while updating Looker Studio URL:', err);
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        addToast(`Đã xảy ra lỗi không mong muốn: ${errorMessage}`, 'error');
-    }
-}, [fetchAllData, isSupabaseConfigured, addToast]);
-
 const updateKpiCommissionStatus = useCallback(async (kpiEntryId: string) => {
     if (!isSupabaseConfigured) return;
     try {
@@ -671,7 +648,6 @@ const updateKpiCommissionStatus = useCallback(async (kpiEntryId: string) => {
               updateKpiEntry={updateKpiEntry} 
               updateKpiConfirmation={updateKpiConfirmation} 
               updateProjectName={updateProjectName} 
-              updateLookerStudioUrl={updateLookerStudioUrl}
               updateKpiCommissionStatus={updateKpiCommissionStatus}
               fetchProjects={fetchAllData} 
             />} 
@@ -697,7 +673,6 @@ const updateKpiCommissionStatus = useCallback(async (kpiEntryId: string) => {
   );
 };
 
-
 const App: React.FC = () => (
   <HashRouter>
     <ToastProvider>
@@ -707,6 +682,5 @@ const App: React.FC = () => (
     </ToastProvider>
   </HashRouter>
 );
-
 
 export default App;

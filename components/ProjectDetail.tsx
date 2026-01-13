@@ -1,10 +1,12 @@
 
-import React, { useState, useMemo } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { Project, KpiEntry, PaymentType, PaymentStatus, ReportStatus, Staff } from '../types';
-import { ArrowLeftIcon, PencilIcon, CalendarIcon, ChartPieIcon, CashIcon, UsersIcon, SpinnerIcon } from './Icons';
+import { ArrowLeftIcon, PencilIcon, CalendarIcon, ChartPieIcon, CashIcon, UsersIcon, SpinnerIcon, XCircleIcon, ShieldCheckIcon } from './Icons';
 import { format } from 'date-fns';
 import { useToast } from '../contexts/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabaseClient';
 import ProgressBar from './ProgressBar';
 import Button from './ui/Button';
 
@@ -14,7 +16,7 @@ import AssignmentTab from './project-detail/AssignmentTab';
 import ReportTab from './project-detail/ReportTab';
 import PaymentTab from './project-detail/PaymentTab';
 import CommissionTab from './project-detail/CommissionTab';
-import PerformanceTab from './project-detail/PerformanceTab';
+import SettingsTab from './project-detail/SettingsTab';
 
 interface ProjectDetailProps {
   projects: Project[];
@@ -25,7 +27,6 @@ interface ProjectDetailProps {
   updateKpiEntry: (kpiEntryId: string, updates: Partial<Pick<KpiEntry, 'reportStatus' | 'reportSentDate'>>) => Promise<void>;
   updateKpiConfirmation: (kpiEntryId: string, confirmationUrl: string) => Promise<void>;
   updateProjectName: (projectId: string, newName: string) => Promise<void>;
-  updateLookerStudioUrl: (projectId: string, url: string | null) => Promise<void>;
   updateKpiCommissionStatus: (kpiEntryId: string) => Promise<void>;
   fetchProjects: () => Promise<void>;
 }
@@ -33,7 +34,7 @@ interface ProjectDetailProps {
 const TabButton: React.FC<{ label: string; isActive: boolean; onClick: () => void }> = ({ label, isActive, onClick }) => (
   <button
     onClick={onClick}
-    className={`py-3 px-5 text-base font-medium focus:outline-none transition-colors duration-200 ${
+    className={`py-3 px-5 text-base font-medium focus:outline-none transition-colors duration-200 whitespace-nowrap ${
       isActive
         ? 'border-b-2 border-primary text-primary'
         : 'border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -72,13 +73,20 @@ const StatCard: React.FC<{
     </div>
 );
 
-const ProjectDetail: React.FC<ProjectDetailProps> = ({ projects, allStaff, addKpiEntry, updateMonthlyPayment, updateInstallmentPayment, updateKpiEntry, updateKpiConfirmation, updateProjectName, updateLookerStudioUrl, updateKpiCommissionStatus, fetchProjects }) => {
+const ProjectDetail: React.FC<ProjectDetailProps> = ({ projects, allStaff, addKpiEntry, updateMonthlyPayment, updateInstallmentPayment, updateKpiEntry, updateKpiConfirmation, updateProjectName, updateKpiCommissionStatus, fetchProjects }) => {
   const { projectSlug } = useParams<{ projectSlug: string }>();
   const [activeTab, setActiveTab] = useState('kpi');
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedName, setEditedName] = useState('');
   const [isSavingName, setIsSavingName] = useState(false);
+  
+  // Deletion Request State
+  const [isDeletionRequested, setIsDeletionRequested] = useState(false);
+  const [isRequestingDelete, setIsRequestingDelete] = useState(false);
+
   const { addToast } = useToast();
+  const { isManager, user } = useAuth();
+  const navigate = useNavigate();
 
   const projectId = projectSlug ? projectSlug.split('--').pop() : undefined;
   const project = projects.find(p => p.id === projectId);
@@ -136,11 +144,23 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projects, allStaff, addKp
     };
   }, [project]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (project) {
         setEditedName(project.name);
+        checkDeletionStatus();
     }
   }, [project]);
+
+  const checkDeletionStatus = async () => {
+      if (!project) return;
+      const { data } = await supabase
+        .from('project_deletion_requests')
+        .select('id')
+        .eq('project_id', project.id)
+        .maybeSingle();
+      
+      setIsDeletionRequested(!!data);
+  };
 
   if (!project) {
     return (
@@ -183,7 +203,37 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projects, allStaff, addKp
     setIsEditingName(false);
   };
 
-  const TABS_ORDER = ['kpi', 'report', 'payment', 'commission', 'assignment'];
+  const handleRequestDelete = async () => {
+      if (!window.confirm("CẢNH BÁO: Bạn đang yêu cầu xóa toàn bộ dự án này.\n\nHành động này cần sự phê duyệt của một Manager khác. Sau khi duyệt, toàn bộ dữ liệu KPI, thanh toán và báo cáo sẽ bị xóa vĩnh viễn.\n\nBạn có chắc chắn muốn gửi yêu cầu?")) {
+          return;
+      }
+
+      setIsRequestingDelete(true);
+      try {
+          const { error } = await supabase.from('project_deletion_requests').insert({
+              project_id: project.id,
+              requested_by: user?.id
+          });
+
+          if (error) {
+              if (error.code === '23505') { // Unique constraint violation
+                  addToast('Dự án này đã có yêu cầu xóa đang chờ duyệt.', 'error');
+                  setIsDeletionRequested(true);
+              } else {
+                  throw error;
+              }
+          } else {
+              addToast('Đã gửi yêu cầu xóa dự án. Vui lòng chờ Manager khác phê duyệt.', 'success');
+              setIsDeletionRequested(true);
+          }
+      } catch (err: any) {
+          addToast(`Lỗi: ${err.message}`, 'error');
+      } finally {
+          setIsRequestingDelete(false);
+      }
+  };
+
+  const TABS_ORDER = ['kpi', 'report', 'payment', 'commission', 'assignment', 'settings'];
   
   const TABS = {
       kpi: { label: 'Quản lý KPI', component: <KpiTab project={project} addKpiEntry={addKpiEntry} /> },
@@ -191,7 +241,16 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projects, allStaff, addKp
       report: { label: 'Quản lý báo cáo', component: <ReportTab project={project} updateKpiEntry={updateKpiEntry} updateKpiConfirmation={updateKpiConfirmation} /> },
       payment: { label: 'Quản lý thanh toán', component: <PaymentTab project={project} updateMonthlyPayment={updateMonthlyPayment} updateInstallmentPayment={updateInstallmentPayment} fetchProjects={fetchProjects} /> },
       commission: { label: 'Quản lý hoa hồng', component: <CommissionTab project={project} updateKpiCommissionStatus={updateKpiCommissionStatus} /> },
-      performance: { label: 'Theo dõi hiệu suất', component: <PerformanceTab project={project} updateLookerStudioUrl={updateLookerStudioUrl} /> }
+      settings: { 
+          label: 'Cấu hình', 
+          component: <SettingsTab 
+              project={project} 
+              isManager={isManager} 
+              isDeletionRequested={isDeletionRequested} 
+              isRequestingDelete={isRequestingDelete} 
+              handleRequestDelete={handleRequestDelete} 
+          /> 
+      }
   };
 
   return (
@@ -202,29 +261,45 @@ const ProjectDetail: React.FC<ProjectDetailProps> = ({ projects, allStaff, addKp
             Quay lại Danh sách dự án
         </Link>
       </div>
-      <div className="flex items-center gap-3 mb-6">
-        {!isEditingName ? (
-            <>
-                <h1 className="text-3xl font-bold text-dark">{project.name}</h1>
-                <button onClick={handleStartEdit} className="text-gray-500 hover:text-primary transition-colors p-1 rounded-full" title="Chỉnh sửa tên dự án">
-                    <PencilIcon className="h-5 w-5" />
-                </button>
-            </>
-        ) : (
-            <div className="flex items-center gap-2 w-full max-w-md">
-                <input 
-                type="text"
-                value={editedName}
-                onChange={(e) => setEditedName(e.target.value)}
-                className="block w-full px-3 py-2 text-2xl font-bold border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary"
-                disabled={isSavingName}
-                autoFocus
-                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') handleCancelEdit(); }}
-                />
-                <Button onClick={handleSaveName} isLoading={isSavingName}>Lưu</Button>
-                <Button variant="secondary" onClick={handleCancelEdit} disabled={isSavingName}>Hủy</Button>
-            </div>
-        )}
+      
+      {/* Banner for Deletion Request - Keep top banner for high visibility */}
+      {isDeletionRequested && (
+          <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-6 flex justify-between items-center animate-fade-in-right">
+              <div className="flex items-center">
+                  <ShieldCheckIcon className="h-6 w-6 text-red-500 mr-3" />
+                  <div>
+                      <p className="font-bold text-red-700">Dự án này đang chờ phê duyệt xóa</p>
+                      <p className="text-sm text-red-600">Một Manager khác cần truy cập vào Dashboard để duyệt yêu cầu này.</p>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+        <div className="flex items-center gap-3">
+            {!isEditingName ? (
+                <>
+                    <h1 className="text-3xl font-bold text-dark">{project.name}</h1>
+                    <button onClick={handleStartEdit} className="text-gray-500 hover:text-primary transition-colors p-1 rounded-full" title="Chỉnh sửa tên dự án">
+                        <PencilIcon className="h-5 w-5" />
+                    </button>
+                </>
+            ) : (
+                <div className="flex items-center gap-2 w-full max-w-md">
+                    <input 
+                    type="text"
+                    value={editedName}
+                    onChange={(e) => setEditedName(e.target.value)}
+                    className="block w-full px-3 py-2 text-2xl font-bold border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary"
+                    disabled={isSavingName}
+                    autoFocus
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') handleCancelEdit(); }}
+                    />
+                    <Button onClick={handleSaveName} isLoading={isSavingName}>Lưu</Button>
+                    <Button variant="secondary" onClick={handleCancelEdit} disabled={isSavingName}>Hủy</Button>
+                </div>
+            )}
+        </div>
       </div>
 
       {overviewStats && (

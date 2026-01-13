@@ -110,6 +110,17 @@ export interface CommissionPayout {
   project?: Project; // Cẩn thận vòng lặp nếu Project chứa CommissionPayout
 }
 
+// [NEW] Deletion Request Type
+export interface DeletionRequest {
+  id: string;
+  project_id: string;
+  requested_by: string; // User ID
+  created_at: string;
+  // Join fields
+  project?: Project;
+  requester_profile?: UserProfile;
+}
+
 // --- END NEW TYPES ---
 
 export interface Project {
