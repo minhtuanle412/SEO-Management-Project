@@ -30,8 +30,8 @@ const CodeBlock: React.FC<{ children: string }> = ({ children }) => {
 
 const SetupGuide: React.FC = () => {
   const masterScript = `
--- MASTER SCRIPT: CẬP NHẬT TOÀN BỘ DATABASE & QUYỀN (FIXED)
--- Chạy script này sẽ sửa lỗi "schema cache" và lỗi kết nối bảng.
+-- MASTER SCRIPT: CẬP NHẬT TOÀN BỘ DATABASE & QUYỀN (HỖ TRỢ SUPER ADMIN)
+-- Script này an toàn để chạy nhiều lần.
 
 BEGIN;
 
@@ -129,13 +129,22 @@ CREATE TABLE IF NOT EXISTS public.commission_payouts (
   project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
   staff_id UUID REFERENCES public.nhan_su(id) ON DELETE SET NULL,
   amount NUMERIC NOT NULL,
-  month VARCHAR(7) NOT NULL,
+  month VARCHAR(7) NOT NULL, 
   created_at TIMESTAMPTZ DEFAULT now(),
   created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL
 );
 ALTER TABLE public.commission_payouts ADD COLUMN IF NOT EXISTS effort_percentage INT DEFAULT 100;
 
--- 7. Auth & Profiles (Đảm bảo profiles tồn tại trước khi tạo deletion requests)
+-- 7. Bảng Yêu cầu Xóa Dự án
+CREATE TABLE IF NOT EXISTS public.project_deletion_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
+  requested_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(project_id)
+);
+
+-- 8. Auth & Profiles
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT,
@@ -160,18 +169,6 @@ CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXEC
 
 INSERT INTO public.profiles (id, email) SELECT id, email FROM auth.users ON CONFLICT (id) DO NOTHING;
 
--- [FIXED] 8. Bảng Yêu cầu Xóa Dự án
--- Xóa bảng cũ để tạo lại với quan hệ đúng (Foreign Key trỏ tới public.profiles thay vì auth.users để dễ join)
-DROP TABLE IF EXISTS public.project_deletion_requests;
-
-CREATE TABLE public.project_deletion_requests (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
-  requested_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL, -- Fix: Trỏ về profiles
-  created_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE(project_id)
-);
-
 -- 9. RLS Policies
 DO $$
 DECLARE
@@ -183,10 +180,11 @@ BEGIN
   END LOOP;
 END $$;
 
--- XÓA POLICY CŨ
+-- CLEANUP OLD POLICIES
 DROP POLICY IF EXISTS "Public read profiles" ON public.profiles;
 DROP POLICY IF EXISTS "User update own profile" ON public.profiles;
 DROP POLICY IF EXISTS "Admin update role" ON public.profiles;
+
 DROP POLICY IF EXISTS "Read config" ON public.nhan_su;
 DROP POLICY IF EXISTS "Admin write config" ON public.nhan_su;
 DROP POLICY IF EXISTS "Read config" ON public.phong_ban;
@@ -195,42 +193,57 @@ DROP POLICY IF EXISTS "Read config" ON public.chuc_vu;
 DROP POLICY IF EXISTS "Admin write config" ON public.chuc_vu;
 DROP POLICY IF EXISTS "Read config" ON public.cau_hinh_hoa_hong;
 DROP POLICY IF EXISTS "Admin write config" ON public.cau_hinh_hoa_hong;
+
 DROP POLICY IF EXISTS "Auth read payouts" ON public.commission_payouts;
 DROP POLICY IF EXISTS "Manager insert payouts" ON public.commission_payouts;
+
 DROP POLICY IF EXISTS "Manager manage deletion requests" ON public.project_deletion_requests;
+
 DROP POLICY IF EXISTS "Auth access projects" ON public.projects;
 DROP POLICY IF EXISTS "Auth access installments" ON public.payment_installments;
 DROP POLICY IF EXISTS "Auth access breakdown" ON public.monthly_breakdown;
 DROP POLICY IF EXISTS "Auth access kpi" ON public.kpi_entries;
 DROP POLICY IF EXISTS "Auth access assignments" ON public.phan_cong_du_an;
 
--- TẠO LẠI POLICY MỚI
+-- CREATE NEW POLICIES (Updated for super_admin)
+
+-- Profiles
 CREATE POLICY "Public read profiles" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "User update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
-CREATE POLICY "Admin update role" ON public.profiles FOR UPDATE USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
+-- Admin & Super Admin can update roles
+CREATE POLICY "Admin update role" ON public.profiles FOR UPDATE USING (
+  (SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'super_admin')
+);
 
+-- Config Tables (Admin & Super Admin write)
 CREATE POLICY "Read config" ON public.nhan_su FOR SELECT USING (true);
-CREATE POLICY "Admin write config" ON public.nhan_su FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
+CREATE POLICY "Admin write config" ON public.nhan_su FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'super_admin'));
+
 CREATE POLICY "Read config" ON public.phong_ban FOR SELECT USING (true);
-CREATE POLICY "Admin write config" ON public.phong_ban FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
+CREATE POLICY "Admin write config" ON public.phong_ban FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'super_admin'));
+
 CREATE POLICY "Read config" ON public.chuc_vu FOR SELECT USING (true);
-CREATE POLICY "Admin write config" ON public.chuc_vu FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
+CREATE POLICY "Admin write config" ON public.chuc_vu FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'super_admin'));
+
 CREATE POLICY "Read config" ON public.cau_hinh_hoa_hong FOR SELECT USING (true);
-CREATE POLICY "Admin write config" ON public.cau_hinh_hoa_hong FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
+CREATE POLICY "Admin write config" ON public.cau_hinh_hoa_hong FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'super_admin'));
 
+-- Commission Payouts (Admin, Super Admin, Manager write)
 CREATE POLICY "Auth read payouts" ON public.commission_payouts FOR SELECT TO authenticated USING (true);
-CREATE POLICY "Manager insert payouts" ON public.commission_payouts FOR INSERT TO authenticated WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'manager'));
+CREATE POLICY "Manager insert payouts" ON public.commission_payouts FOR INSERT TO authenticated 
+WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'super_admin', 'manager'));
 
-CREATE POLICY "Manager manage deletion requests" ON public.project_deletion_requests FOR ALL TO authenticated USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'manager'));
+-- Deletion Requests
+CREATE POLICY "Manager manage deletion requests" ON public.project_deletion_requests
+FOR ALL TO authenticated
+USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'super_admin', 'manager'));
 
+-- Project Data (Full access for authenticated)
 CREATE POLICY "Auth access projects" ON public.projects FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Auth access installments" ON public.payment_installments FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Auth access breakdown" ON public.monthly_breakdown FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Auth access kpi" ON public.kpi_entries FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Auth access assignments" ON public.phan_cong_du_an FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
--- [IMPORTANT] Force Schema Cache Reload
-NOTIFY pgrst, 'reload schema';
 
 COMMIT;
   `;
@@ -243,44 +256,26 @@ COMMIT;
       </Link>
       <h1 className="text-4xl font-bold text-dark mb-4">Hướng dẫn Cài đặt & Cập nhật</h1>
       <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-6">
-        <p className="text-yellow-700 font-bold">KHẮC PHỤC LỖI "SCHEMA CACHE"</p>
-        <p className="text-yellow-700">Đoạn script dưới đây đã được cập nhật thêm lệnh <code>NOTIFY pgrst, 'reload schema';</code> để tự động sửa lỗi cache và cập nhật quan hệ bảng. Vui lòng chạy lại ngay.</p>
+        <p className="text-yellow-700 font-bold">CẬP NHẬT DATABASE (Quyền Super Admin)</p>
+        <p className="text-yellow-700">Script SQL đã được cập nhật để hỗ trợ quyền <strong>Super Admin</strong>. Vui lòng chạy lại script bên dưới trong Supabase SQL Editor.</p>
       </div>
-      <p className="text-gray-600 mb-8">
-        Trang này cung cấp các mã lệnh SQL cần thiết để thiết lập cơ sở dữ liệu cho ứng dụng.
-      </p>
-
+      
       <div className="space-y-12">
         <section className="bg-blue-50 border border-blue-200 rounded-xl p-6">
           <div className="flex items-center mb-4">
              <CheckCircleIcon className="h-8 w-8 text-blue-600 mr-3" />
-             <h2 className="text-2xl font-bold text-blue-900">Script Tổng hợp (Safe Mode)</h2>
+             <h2 className="text-2xl font-bold text-blue-900">Script Tổng hợp</h2>
           </div>
-          <p className="text-blue-800 mb-4">
-            Script này sẽ tự động tạo các bảng mới và cập nhật cấu trúc bảng cũ mà <strong>không làm mất dữ liệu</strong>.
-          </p>
           <CodeBlock>{masterScript}</CodeBlock>
           
-          <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-             <h4 className="font-bold text-yellow-800">Sau khi chạy xong:</h4>
-             <p className="text-yellow-700 text-sm mt-1">
-                Đừng quên chạy lệnh sau để cấp quyền Admin cho chính bạn (thay email của bạn vào):<br/>
-                <code className="bg-yellow-100 px-2 py-1 rounded font-mono text-black select-all">UPDATE public.profiles SET role = 'admin' WHERE email = 'YOUR_EMAIL@GMAIL.COM';</code>
+           <div className="mt-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+             <h4 className="font-bold text-purple-800">Cấp quyền Super Admin:</h4>
+             <p className="text-purple-700 text-sm mt-1">
+                Để thăng cấp cho chính bạn thành Super Admin, hãy chạy lệnh sau:<br/>
+                <code className="bg-purple-100 px-2 py-1 rounded font-mono text-black select-all">UPDATE public.profiles SET role = 'super_admin' WHERE email = 'YOUR_EMAIL@GMAIL.COM';</code>
              </p>
           </div>
         </section>
-
-        <section>
-          <h2 className="text-2xl font-bold text-dark border-b-2 border-gray-200 pb-2 mb-4">Thiết lập Storage</h2>
-          <p className="text-gray-700 mb-4">
-            Bạn cần tạo 2 bucket công khai (Public) trong menu <strong>Storage</strong> của Supabase:
-          </p>
-          <ul className="list-disc list-inside space-y-2 text-gray-700 bg-gray-50 p-6 rounded-lg border">
-             <li>Bucket 1: <strong>payment_proofs</strong></li>
-             <li>Bucket 2: <strong>confirmation_proofs</strong></li>
-          </ul>
-        </section>
-
       </div>
     </div>
   );

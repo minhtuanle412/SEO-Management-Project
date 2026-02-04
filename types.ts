@@ -21,7 +21,7 @@ export enum PaymentType {
 }
 
 // --- AUTH & ROLES ---
-export type UserRole = 'admin' | 'manager' | 'staff';
+export type UserRole = 'super_admin' | 'admin' | 'manager' | 'staff';
 
 export interface UserProfile {
   id: string;
