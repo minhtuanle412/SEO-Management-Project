@@ -30,8 +30,8 @@ const CodeBlock: React.FC<{ children: string }> = ({ children }) => {
 
 const SetupGuide: React.FC = () => {
   const masterScript = `
--- MASTER SCRIPT: CẬP NHẬT TOÀN BỘ DATABASE & QUYỀN (SAFE MODE)
--- Script này an toàn để chạy nhiều lần.
+-- MASTER SCRIPT: CẬP NHẬT TOÀN BỘ DATABASE & QUYỀN (FIXED)
+-- Chạy script này sẽ sửa lỗi "schema cache" và lỗi kết nối bảng.
 
 BEGIN;
 
@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS public.payment_installments (
   status TEXT NOT NULL,
   payment_proof_url TEXT
 );
+ALTER TABLE public.payment_installments ADD COLUMN IF NOT EXISTS payment_date DATE;
 
 -- 3. Bảng Monthly Breakdown
 CREATE TABLE IF NOT EXISTS public.monthly_breakdown (
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS public.monthly_breakdown (
 );
 ALTER TABLE public.monthly_breakdown ADD COLUMN IF NOT EXISTS payment_proof_url TEXT;
 ALTER TABLE public.monthly_breakdown ADD COLUMN IF NOT EXISTS installment_id UUID REFERENCES public.payment_installments(id) ON DELETE SET NULL;
+ALTER TABLE public.monthly_breakdown ADD COLUMN IF NOT EXISTS payment_date DATE;
 
 -- 4. Bảng KPI Entries
 CREATE TABLE IF NOT EXISTS public.kpi_entries (
@@ -113,7 +115,6 @@ CREATE TABLE IF NOT EXISTS public.phan_cong_du_an (
   nhan_su_id UUID REFERENCES public.nhan_su(id) ON DELETE CASCADE NOT NULL,
   UNIQUE(project_id, nhan_su_id)
 );
--- [NEW] Thêm cột tỷ lệ phân công cho nhân sự (mặc định 100%)
 ALTER TABLE public.phan_cong_du_an ADD COLUMN IF NOT EXISTS ty_le_phan_cong INT DEFAULT 100;
 
 CREATE TABLE IF NOT EXISTS public.cau_hinh_hoa_hong (
@@ -122,20 +123,19 @@ CREATE TABLE IF NOT EXISTS public.cau_hinh_hoa_hong (
 );
 ALTER TABLE public.cau_hinh_hoa_hong ADD COLUMN IF NOT EXISTS chuc_vu_id UUID REFERENCES public.chuc_vu(id) ON DELETE CASCADE UNIQUE;
 
--- 6. Bảng Chốt sổ Hoa hồng (Snapshot)
+-- 6. Bảng Chốt sổ Hoa hồng
 CREATE TABLE IF NOT EXISTS public.commission_payouts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
   staff_id UUID REFERENCES public.nhan_su(id) ON DELETE SET NULL,
   amount NUMERIC NOT NULL,
-  month VARCHAR(7) NOT NULL, -- Format: YYYY-MM
+  month VARCHAR(7) NOT NULL,
   created_at TIMESTAMPTZ DEFAULT now(),
   created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL
 );
--- [NEW] Thêm cột tỷ lệ nỗ lực tại thời điểm chốt (mặc định 100%)
 ALTER TABLE public.commission_payouts ADD COLUMN IF NOT EXISTS effort_percentage INT DEFAULT 100;
 
--- 7. Auth & Profiles
+-- 7. Auth & Profiles (Đảm bảo profiles tồn tại trước khi tạo deletion requests)
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT,
@@ -160,10 +160,22 @@ CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXEC
 
 INSERT INTO public.profiles (id, email) SELECT id, email FROM auth.users ON CONFLICT (id) DO NOTHING;
 
--- 8. RLS Policies
+-- [FIXED] 8. Bảng Yêu cầu Xóa Dự án
+-- Xóa bảng cũ để tạo lại với quan hệ đúng (Foreign Key trỏ tới public.profiles thay vì auth.users để dễ join)
+DROP TABLE IF EXISTS public.project_deletion_requests;
+
+CREATE TABLE public.project_deletion_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
+  requested_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL, -- Fix: Trỏ về profiles
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(project_id)
+);
+
+-- 9. RLS Policies
 DO $$
 DECLARE
-  tabs text[] := ARRAY['projects', 'payment_installments', 'monthly_breakdown', 'kpi_entries', 'nhan_su', 'phong_ban', 'chuc_vu', 'phan_cong_du_an', 'cau_hinh_hoa_hong', 'profiles', 'commission_payouts'];
+  tabs text[] := ARRAY['projects', 'payment_installments', 'monthly_breakdown', 'kpi_entries', 'nhan_su', 'phong_ban', 'chuc_vu', 'phan_cong_du_an', 'cau_hinh_hoa_hong', 'profiles', 'commission_payouts', 'project_deletion_requests'];
   t text;
 BEGIN
   FOREACH t IN ARRAY tabs LOOP
@@ -171,14 +183,10 @@ BEGIN
   END LOOP;
 END $$;
 
--- 8.1 XÓA CÁC POLICY CŨ (Để tránh lỗi "already exists" khi chạy lại)
-
--- Profiles
+-- XÓA POLICY CŨ
 DROP POLICY IF EXISTS "Public read profiles" ON public.profiles;
 DROP POLICY IF EXISTS "User update own profile" ON public.profiles;
 DROP POLICY IF EXISTS "Admin update role" ON public.profiles;
-
--- Config Tables
 DROP POLICY IF EXISTS "Read config" ON public.nhan_su;
 DROP POLICY IF EXISTS "Admin write config" ON public.nhan_su;
 DROP POLICY IF EXISTS "Read config" ON public.phong_ban;
@@ -187,52 +195,42 @@ DROP POLICY IF EXISTS "Read config" ON public.chuc_vu;
 DROP POLICY IF EXISTS "Admin write config" ON public.chuc_vu;
 DROP POLICY IF EXISTS "Read config" ON public.cau_hinh_hoa_hong;
 DROP POLICY IF EXISTS "Admin write config" ON public.cau_hinh_hoa_hong;
-
--- Commission Payouts
 DROP POLICY IF EXISTS "Auth read payouts" ON public.commission_payouts;
 DROP POLICY IF EXISTS "Manager insert payouts" ON public.commission_payouts;
-
--- Project Data
+DROP POLICY IF EXISTS "Manager manage deletion requests" ON public.project_deletion_requests;
 DROP POLICY IF EXISTS "Auth access projects" ON public.projects;
 DROP POLICY IF EXISTS "Auth access installments" ON public.payment_installments;
 DROP POLICY IF EXISTS "Auth access breakdown" ON public.monthly_breakdown;
 DROP POLICY IF EXISTS "Auth access kpi" ON public.kpi_entries;
 DROP POLICY IF EXISTS "Auth access assignments" ON public.phan_cong_du_an;
 
-
--- 8.2 TẠO LẠI POLICY MỚI
-
--- Policy cho Profiles
+-- TẠO LẠI POLICY MỚI
 CREATE POLICY "Public read profiles" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "User update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
-CREATE POLICY "Admin update role" ON public.profiles FOR UPDATE USING (
-  (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
-);
+CREATE POLICY "Admin update role" ON public.profiles FOR UPDATE USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
 
--- Policy cho Cấu hình (Ai cũng xem, Chỉ Admin sửa)
 CREATE POLICY "Read config" ON public.nhan_su FOR SELECT USING (true);
 CREATE POLICY "Admin write config" ON public.nhan_su FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
-
 CREATE POLICY "Read config" ON public.phong_ban FOR SELECT USING (true);
 CREATE POLICY "Admin write config" ON public.phong_ban FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
-
 CREATE POLICY "Read config" ON public.chuc_vu FOR SELECT USING (true);
 CREATE POLICY "Admin write config" ON public.chuc_vu FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
-
 CREATE POLICY "Read config" ON public.cau_hinh_hoa_hong FOR SELECT USING (true);
 CREATE POLICY "Admin write config" ON public.cau_hinh_hoa_hong FOR ALL USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
 
--- Policy cho Commission Payouts (Ai cũng xem được, chỉ Admin/Manager được tạo)
 CREATE POLICY "Auth read payouts" ON public.commission_payouts FOR SELECT TO authenticated USING (true);
-CREATE POLICY "Manager insert payouts" ON public.commission_payouts FOR INSERT TO authenticated 
-WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'manager'));
+CREATE POLICY "Manager insert payouts" ON public.commission_payouts FOR INSERT TO authenticated WITH CHECK ((SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'manager'));
 
--- Policy cho Dữ liệu Dự án
+CREATE POLICY "Manager manage deletion requests" ON public.project_deletion_requests FOR ALL TO authenticated USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'manager'));
+
 CREATE POLICY "Auth access projects" ON public.projects FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Auth access installments" ON public.payment_installments FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Auth access breakdown" ON public.monthly_breakdown FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Auth access kpi" ON public.kpi_entries FOR ALL TO authenticated USING (true) WITH CHECK (true);
 CREATE POLICY "Auth access assignments" ON public.phan_cong_du_an FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- [IMPORTANT] Force Schema Cache Reload
+NOTIFY pgrst, 'reload schema';
 
 COMMIT;
   `;
@@ -245,8 +243,8 @@ COMMIT;
       </Link>
       <h1 className="text-4xl font-bold text-dark mb-4">Hướng dẫn Cài đặt & Cập nhật</h1>
       <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-6">
-        <p className="text-yellow-700 font-bold">CẬP NHẬT DATABASE (Quan trọng)</p>
-        <p className="text-yellow-700">Đã cập nhật cấu trúc bảng để hỗ trợ <strong>phân chia tỷ lệ hoa hồng</strong>. Vui lòng copy và chạy lại script bên dưới trong Supabase SQL Editor.</p>
+        <p className="text-yellow-700 font-bold">KHẮC PHỤC LỖI "SCHEMA CACHE"</p>
+        <p className="text-yellow-700">Đoạn script dưới đây đã được cập nhật thêm lệnh <code>NOTIFY pgrst, 'reload schema';</code> để tự động sửa lỗi cache và cập nhật quan hệ bảng. Vui lòng chạy lại ngay.</p>
       </div>
       <p className="text-gray-600 mb-8">
         Trang này cung cấp các mã lệnh SQL cần thiết để thiết lập cơ sở dữ liệu cho ứng dụng.
