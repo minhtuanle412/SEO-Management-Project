@@ -1,0 +1,41 @@
+# Tự động áp dụng migration lên Supabase production khi có migration mới trên nhánh main.
+# Cần 2 repository secret: SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD.
+# Xem AGENTS.md mục 2.1.
+# Supabase CLI v3 mặc định chạy với database ở máy, nên mọi lệnh cần --remote.
+# --yes bắt buộc khi ghi lên project thật mà không có người xác nhận.
+name: Supabase migrations
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**'
+  workflow_dispatch:
+
+# Không chạy song song hai lần push migration
+concurrency:
+  group: supabase-migrations
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID: ncnofduhsfejlmtjfirn
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.0.0 # giữ cùng phiên bản với devDependency trong package.json
+
+      - name: Link project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
+
+      - name: Trạng thái migration trước khi chạy
+        run: supabase migration list --remote --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Áp dụng migration mới
+        run: supabase db push --remote --password "$SUPABASE_DB_PASSWORD" --yes
